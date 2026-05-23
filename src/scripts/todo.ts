@@ -6,6 +6,18 @@ export interface Todo {
   status: "todo" | "in_progress" | "done";
   priority: "low" | "medium" | "high";
   deadline: string | null;
+  thumbnailUrl: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TaskAttachment {
+  id: string;
+  taskId: string;
+  fileName: string;
+  fileUrl: string;
+  fileSize: number;
+  mimeType: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -40,6 +52,22 @@ export function isDeadlineOverdue(dateStr: string): boolean {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return date.getTime() < today.getTime();
+}
+
+export function formatFileSize(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+export function getFileIcon(mimeType: string): string {
+  if (mimeType.startsWith("image/")) return "🖼️";
+  if (mimeType === "application/pdf") return "📄";
+  if (mimeType.includes("wordprocessingml")) return "📝";
+  if (mimeType === "application/zip" || mimeType.includes("zip")) return "📦";
+  if (mimeType === "text/plain") return "📃";
+  return "📎";
 }
 
 export const PRIORITY_LABELS: Record<string, string> = {

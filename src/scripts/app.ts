@@ -1,9 +1,11 @@
 import { actions } from "astro:actions";
-import type { Todo, Filter } from "./todo";
+import type { Todo, TaskAttachment, Filter } from "./todo";
 import {
   escapeHtml,
   formatDeadline,
   isDeadlineOverdue,
+  formatFileSize,
+  getFileIcon,
   PRIORITY_LABELS,
   STATUS_LABELS,
 } from "./todo";
@@ -13,6 +15,7 @@ let currentFilter: Filter = "all";
 let addFormExpanded = false;
 let editingId: string | null = null;
 
+// DOM refs
 let inputEl: HTMLInputElement | null = null;
 let descriptionEl: HTMLTextAreaElement | null = null;
 let deadlineEl: HTMLInputElement | null = null;
@@ -24,6 +27,14 @@ let filterEl: HTMLElement | null = null;
 let modalOverlayEl: HTMLElement | null = null;
 let modalFormEl: HTMLFormElement | null = null;
 let expandBtnEl: HTMLElement | null = null;
+
+
+// Modal sub-refs
+let editThumbnailContainerEl: HTMLElement | null = null;
+let editThumbnailInputEl: HTMLInputElement | null = null;
+let editAttachmentsListEl: HTMLElement | null = null;
+let editAttachmentInputEl: HTMLInputElement | null = null;
+let editDropZoneEl: HTMLElement | null = null;
 
 function filteredTodos(): Todo[] {
   switch (currentFilter) {
@@ -128,6 +139,14 @@ function renderList(): void {
         : ""
     }" data-id="${todo.id}">
       <div class="flex items-center gap-2.5">
+        ${
+          todo.thumbnailUrl
+            ? `<div class="size-10 shrink-0 rounded-md overflow-hidden border border-border">
+                <img src="${escapeHtml(todo.thumbnailUrl)}" alt="" class="w-full h-full object-cover" loading="lazy" />
+              </div>`
+            : ""
+        }
+
         <button class="flex items-center justify-center bg-none border-none cursor-pointer p-0.5 shrink-0 focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 focus-visible:rounded-[6px]" data-action="toggle" data-id="${
           todo.id
         }" aria-label="${todo.done ? "Tandai belum selesai" : "Tandai selesai"}" tabindex="0">
@@ -156,7 +175,7 @@ function renderList(): void {
           }
         </div>
 
-        <div class="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 group-[.bg-primary\\/5]:opacity-100 transition-opacity duration-200">
+        <div class="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 group-[.bg-primary\\\\/5]:opacity-100 transition-opacity duration-200">
           <button class="flex items-center justify-center size-8 border-none bg-transparent rounded-md cursor-pointer text-muted-foreground transition-all duration-200 hover:text-primary hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-1" data-action="edit" data-id="${
             todo.id
           }" aria-label="Edit tugas" title="Edit">
@@ -299,6 +318,143 @@ async function handleListClick(e: MouseEvent): Promise<void> {
   }
 }
 
+// ─── Thumbnail & Attachment Upload ───────────────────────────────────────────
+
+async function uploadThumbnail(taskId: string, file: File): Promise<void> {
+  if (!editThumbnailContainerEl) return;
+
+  // Show loading state
+  editThumbnailContainerEl.innerHTML = `
+    <div class="flex items-center justify-center py-6 text-muted-foreground">
+      <svg class="animate-spin size-5 mr-2" viewBox="0 0 24 24" fill="none">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+      </svg>
+      <span class="text-sm">Mengunggah...</span>
+    </div>
+  `;
+
+  const fd = new FormData();
+  fd.set("taskId", taskId);
+  fd.set("file", file);
+  const { data, error } = await actions.uploadThumbnail(fd);
+
+  if (error) {
+    console.error("Failed to upload thumbnail:", error);
+    renderThumbnailPreview(taskId, null);
+    return;
+  }
+
+  renderThumbnailPreview(taskId, data?.url ?? null);
+  await fetchTodos();
+}
+
+function renderThumbnailPreview(taskId: string, url: string | null): void {
+  if (!editThumbnailContainerEl) return;
+
+  if (url) {
+    editThumbnailContainerEl.innerHTML = `
+      <div class="relative group rounded-lg overflow-hidden border border-border">
+        <img src="${escapeHtml(url)}" alt="Thumbnail" class="w-full h-32 object-cover" />
+        <div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors duration-200 flex items-center justify-center gap-2">
+          <button type="button" class="size-8 rounded-full bg-white/90 text-foreground hover:bg-white transition-colors flex items-center justify-center cursor-pointer" data-thumbnail-action="replace" title="Ganti gambar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="size-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </button>
+          <button type="button" class="size-8 rounded-full bg-white/90 text-error hover:bg-white transition-colors flex items-center justify-center cursor-pointer" data-thumbnail-action="delete" title="Hapus gambar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="size-4"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </div>
+      </div>
+    `;
+
+    // Attach event listeners
+    editThumbnailContainerEl.querySelector("[data-thumbnail-action='replace']")?.addEventListener("click", () => {
+      editThumbnailInputEl?.click();
+    });
+    editThumbnailContainerEl.querySelector("[data-thumbnail-action='delete']")?.addEventListener("click", async () => {
+      const { error } = await actions.deleteThumbnail({ taskId });
+      if (error) {
+        console.error("Failed to delete thumbnail:", error);
+        return;
+      }
+      renderThumbnailPreview(taskId, null);
+      await fetchTodos();
+    });
+  } else {
+    editThumbnailContainerEl.innerHTML = `
+      <button type="button" class="w-full py-6 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:text-foreground hover:border-primary hover:bg-primary/5 transition-all duration-200 cursor-pointer flex flex-col items-center gap-1.5" data-thumbnail-action="add">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="size-6"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        <span class="text-xs">Tambahkan thumbnail</span>
+      </button>
+    `;
+
+    editThumbnailContainerEl.querySelector("[data-thumbnail-action='add']")?.addEventListener("click", () => {
+      editThumbnailInputEl?.click();
+    });
+  }
+}
+
+async function loadAttachments(taskId: string): Promise<void> {
+  if (!editAttachmentsListEl) return;
+
+  const { data, error } = await actions.getAttachments({ taskId });
+  if (error) {
+    console.error("Failed to load attachments:", error);
+    return;
+  }
+
+  renderAttachments(taskId, data ?? []);
+}
+
+function renderAttachments(taskId: string, attachments: TaskAttachment[]): void {
+  if (!editAttachmentsListEl) return;
+
+  if (attachments.length === 0) {
+    editAttachmentsListEl.innerHTML = `
+      <p class="text-xs text-muted-foreground text-center py-4">Belum ada lampiran</p>
+    `;
+    return;
+  }
+
+  editAttachmentsListEl.innerHTML = attachments
+    .map(
+      (att) => `
+    <div class="flex items-center gap-2.5 px-3 py-2 rounded-md bg-muted/50 group hover:bg-muted transition-colors" data-attachment-id="${att.id}">
+      <span class="text-base shrink-0">${getFileIcon(att.mimeType)}</span>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm text-foreground truncate">${escapeHtml(att.fileName)}</p>
+        <p class="text-[11px] text-muted-foreground">${formatFileSize(att.fileSize)}</p>
+      </div>
+      <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <a href="${escapeHtml(att.fileUrl)}" target="_blank" download="${escapeHtml(att.fileName)}" class="flex items-center justify-center size-7 border-none bg-transparent rounded text-muted-foreground hover:text-primary hover:bg-primary/5 transition-all cursor-pointer" title="Unduh">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="size-3.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </a>
+        <button type="button" class="flex items-center justify-center size-7 border-none bg-transparent rounded text-muted-foreground hover:text-error hover:bg-error/5 transition-all cursor-pointer" data-attachment-action="delete" data-attachment-id="${att.id}" title="Hapus">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="size-3.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
+      </div>
+    </div>
+  `
+    )
+    .join("");
+
+  // Attach delete handlers
+  editAttachmentsListEl.querySelectorAll("[data-attachment-action='delete']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const attachmentId = (btn as HTMLElement).dataset.attachmentId;
+      if (!attachmentId) return;
+      const { error } = await actions.deleteAttachment({ attachmentId });
+      if (error) {
+        console.error("Failed to delete attachment:", error);
+        return;
+      }
+      await loadAttachments(taskId);
+    });
+  });
+}
+
+// ─── Edit Modal ──────────────────────────────────────────────────────────────
+
 function openEditModal(id: string): void {
   editingId = id;
   const todo = todos.find((t) => t.id === id);
@@ -312,6 +468,12 @@ function openEditModal(id: string): void {
   (modalFormEl.querySelector("#edit-status") as HTMLSelectElement)!.value = todo.status;
   (modalFormEl.querySelector("#edit-priority") as HTMLSelectElement)!.value = todo.priority;
   modalFormEl.dataset.id = id;
+
+  // Render thumbnail
+  renderThumbnailPreview(id, todo.thumbnailUrl);
+
+  // Load attachments
+  loadAttachments(id);
 
   modalOverlayEl.classList.remove("hidden");
   modalOverlayEl.classList.add("flex");
@@ -404,6 +566,140 @@ function handleModalKeydown(e: KeyboardEvent): void {
   }
 }
 
+// ─── Drag & Drop Upload Zone ────────────────────────────────────────────────
+
+function setupThumbnailDropZone(): void {
+  if (!editThumbnailContainerEl) return;
+
+  let dragCounter = 0;
+
+  editThumbnailContainerEl.addEventListener("dragenter", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter++;
+    if (dragCounter === 1) {
+      editThumbnailContainerEl?.classList.add("ring-2", "ring-primary", "rounded-lg");
+    }
+  });
+
+  editThumbnailContainerEl.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  editThumbnailContainerEl.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter--;
+    if (dragCounter === 0) {
+      editThumbnailContainerEl?.classList.remove("ring-2", "ring-primary");
+    }
+  });
+
+  editThumbnailContainerEl.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter = 0;
+    editThumbnailContainerEl?.classList.remove("ring-2", "ring-primary");
+
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+
+    const taskId = modalFormEl?.dataset.id;
+    if (!taskId) return;
+
+    const allowedTypes = ["image/png", "image/jpg", "image/jpeg", "image/webp"];
+    if (!allowedTypes.includes(file.type)) {
+      console.warn(`Tipe file thumbnail tidak didukung: ${file.type}`);
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      console.warn(`File thumbnail terlalu besar: ${file.name}`);
+      return;
+    }
+
+    await uploadThumbnail(taskId, file);
+  });
+}
+
+function setupDragDropZone(): void {
+  if (!editDropZoneEl) return;
+
+  let dragCounter = 0;
+
+  editDropZoneEl.addEventListener("dragenter", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter++;
+    editDropZoneEl?.classList.add("border-primary", "bg-primary/5");
+  });
+
+  editDropZoneEl.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  editDropZoneEl.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter--;
+    if (dragCounter === 0) {
+      editDropZoneEl?.classList.remove("border-primary", "bg-primary/5");
+    }
+  });
+
+  editDropZoneEl.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter = 0;
+    editDropZoneEl?.classList.remove("border-primary", "bg-primary/5");
+
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    const taskId = modalFormEl?.dataset.id;
+    if (!taskId) return;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      // Validate file type
+      const allowedTypes = [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/zip",
+        "text/plain",
+        "image/png",
+        "image/jpg",
+        "image/jpeg",
+      ];
+
+      if (!allowedTypes.includes(file.type)) {
+        console.warn(`File type not supported: ${file.type}`);
+        continue;
+      }
+
+      if (file.size > 20 * 1024 * 1024) {
+        console.warn(`File too large: ${file.name}`);
+        continue;
+      }
+
+      const afd = new FormData();
+      afd.set("taskId", taskId);
+      afd.set("file", file);
+      const { error } = await actions.uploadAttachment(afd);
+      if (error) {
+        console.error("Failed to upload attachment:", error);
+        continue;
+      }
+
+      await loadAttachments(taskId);
+    }
+  });
+}
+
+// ─── Init ────────────────────────────────────────────────────────────────────
+
 function init(): void {
   inputEl = document.getElementById("todo-input") as HTMLInputElement;
   descriptionEl = document.getElementById("todo-description") as HTMLTextAreaElement;
@@ -417,9 +713,16 @@ function init(): void {
   modalFormEl = document.getElementById("edit-modal-form") as HTMLFormElement;
   expandBtnEl = document.getElementById("expand-btn");
 
-  document
-    .getElementById("todo-form")!
-    .addEventListener("submit", handleAddTodo);
+
+  // Modal sub-refs
+  editThumbnailContainerEl = document.getElementById("edit-thumbnail-container");
+  editThumbnailInputEl = document.getElementById("edit-thumbnail-input") as HTMLInputElement;
+  editAttachmentsListEl = document.getElementById("edit-attachments-list");
+  editAttachmentInputEl = document.getElementById("edit-attachment-input") as HTMLInputElement;
+  editDropZoneEl = document.getElementById("edit-drop-zone");
+
+  // Event listeners
+  document.getElementById("todo-form")!.addEventListener("submit", handleAddTodo);
   listEl.addEventListener("click", handleListClick);
   filterEl.addEventListener("click", handleFilterClick);
   footerEl.addEventListener("click", handleFooterClick);
@@ -435,6 +738,41 @@ function init(): void {
   if (expandBtnEl) {
     expandBtnEl.addEventListener("click", toggleAddFormExpanded);
   }
+
+  // Thumbnail input
+  if (editThumbnailInputEl) {
+    editThumbnailInputEl.addEventListener("change", async () => {
+      const taskId = modalFormEl?.dataset.id;
+      if (!taskId || !editThumbnailInputEl.files?.[0]) return;
+      await uploadThumbnail(taskId, editThumbnailInputEl.files[0]);
+      editThumbnailInputEl.value = "";
+    });
+  }
+
+  // Attachment input
+  if (editAttachmentInputEl) {
+    editAttachmentInputEl.addEventListener("change", async () => {
+      const taskId = modalFormEl?.dataset.id;
+      if (!taskId || !editAttachmentInputEl.files) return;
+      for (let i = 0; i < editAttachmentInputEl.files.length; i++) {
+        const file = editAttachmentInputEl.files[i];
+        const afd = new FormData();
+        afd.set("taskId", taskId);
+        afd.set("file", file);
+        const { error } = await actions.uploadAttachment(afd);
+        if (error) {
+          console.error("Failed to upload attachment:", error);
+          continue;
+        }
+        await loadAttachments(taskId);
+      }
+      editAttachmentInputEl.value = "";
+    });
+  }
+
+  // Drag & drop zones
+  setupThumbnailDropZone();
+  setupDragDropZone();
 
   fetchTodos();
 }
