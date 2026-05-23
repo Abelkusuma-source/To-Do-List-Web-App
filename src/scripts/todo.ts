@@ -1,65 +1,55 @@
 export interface Todo {
   id: string;
   title: string;
+  description: string;
   done: boolean;
+  status: "todo" | "in_progress" | "done";
+  priority: "low" | "medium" | "high";
+  deadline: string | null;
   createdAt: number;
+  updatedAt: number;
 }
 
-export type Filter = 'all' | 'active' | 'completed';
+export type Filter = "all" | "active" | "completed";
 
-function generateId(): string {
-  return crypto.randomUUID();
+export function escapeHtml(text: string): string {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
 }
 
-function getTodosFromStorage(): Todo[] {
-  try {
-    const data = localStorage.getItem('todos');
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
+export function formatDeadline(dateStr: string): string {
+  const date = new Date(dateStr + "T00:00:00");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  if (date.getTime() < today.getTime() && date.toDateString() !== today.toDateString()) return "Terlambat";
+  if (date.toDateString() === today.toDateString()) return "Hari ini";
+  if (date.toDateString() === tomorrow.toDateString()) return "Besok";
+  return date.toLocaleDateString("id-ID", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
-function saveTodos(todos: Todo[]): void {
-  localStorage.setItem('todos', JSON.stringify(todos));
+export function isDeadlineOverdue(dateStr: string): boolean {
+  const date = new Date(dateStr + "T00:00:00");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date.getTime() < today.getTime();
 }
 
-export function getTodos(): Todo[] {
-  return getTodosFromStorage();
-}
+export const PRIORITY_LABELS: Record<string, string> = {
+  low: "Rendah",
+  medium: "Sedang",
+  high: "Tinggi",
+};
 
-export function addTodo(title: string): Todo {
-  const todo: Todo = {
-    id: generateId(),
-    title: title.trim(),
-    done: false,
-    createdAt: Date.now(),
-  };
-  const todos = getTodosFromStorage();
-  todos.push(todo);
-  saveTodos(todos);
-  return todo;
-}
-
-export function updateTodo(id: string, updates: Partial<Pick<Todo, 'title' | 'done'>>): Todo | null {
-  const todos = getTodosFromStorage();
-  const index = todos.findIndex(t => t.id === id);
-  if (index === -1) return null;
-
-  todos[index] = { ...todos[index], ...updates };
-  saveTodos(todos);
-  return todos[index];
-}
-
-export function deleteTodo(id: string): boolean {
-  const todos = getTodosFromStorage();
-  const filtered = todos.filter(t => t.id !== id);
-  if (filtered.length === todos.length) return false;
-  saveTodos(filtered);
-  return true;
-}
-
-export function clearCompleted(): void {
-  const todos = getTodosFromStorage();
-  saveTodos(todos.filter(t => !t.done));
-}
+export const STATUS_LABELS: Record<string, string> = {
+  todo: "Belum",
+  in_progress: "Diproses",
+  done: "Selesai",
+};

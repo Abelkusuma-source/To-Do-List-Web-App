@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Environment variables
+.env
+
+# Drizzle migrations
+migrations/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

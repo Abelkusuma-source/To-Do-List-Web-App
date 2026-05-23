@@ -1,13 +1,14 @@
 ---
-import Layout from '../layouts/Layout.astro';
-import { Button } from '@/components/starwind/button';
-import { Card } from '@/components/starwind/card';
+import Layout from "../layouts/Layout.astro";
 ---
 
-<Layout title="Catatan Tugas" description="Aplikasi Catatan Tugas - Kelola tugas harian Anda">
-  <div id="app" class="w-full max-w-[640px] mx-auto px-4 py-8 min-h-dvh">
-    <Card class="p-6 md:p-8 shadow-lg">
-      <header class="text-center mb-6">
+<Layout title="Catatan Tugas V2" description="Aplikasi Catatan Tugas V2 - Kelola tugas dengan deskripsi, tenggat, status, dan prioritas">
+  <div
+    id="app"
+    class="w-full max-w-[640px] mx-auto px-4 py-6 min-h-dvh"
+  >
+    <div class="bg-card text-card-foreground ring-border flex flex-col rounded-xl ring-1 gap-6 py-6 shadow-lg">
+      <header class="text-center px-6">
         <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-1">
           Catatan Tugas
         </h1>
@@ -16,9 +17,9 @@ import { Card } from '@/components/starwind/card';
         </p>
       </header>
 
-      <main>
+      <main class="px-6">
         <form id="todo-form" class="mb-5">
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 mb-2">
             <div class="relative flex-1">
               <svg
                 class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-[18px] text-muted-foreground"
@@ -36,21 +37,188 @@ import { Card } from '@/components/starwind/card';
                 class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 placeholder:text-muted-foreground h-11 px-3 text-base pl-10 peer"
               />
             </div>
-            <Button type="submit" variant="primary" size="icon" aria-label="Tambah tugas">
+            <button
+              type="button"
+              id="expand-btn"
+              class="flex items-center justify-center size-11 border border-border bg-transparent rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-200 shrink-0 cursor-pointer"
+              aria-label="Detail tambahan"
+              title="Detail tambahan"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4.5 transition-transform duration-200">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            <button
+              type="submit"
+              class="inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-all outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-primary/50 size-11 [&_svg:not([class*='size-'])]:size-4.5"
+              aria-label="Tambah tugas"
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="20 6 9 17 4 12"/>
               </svg>
-            </Button>
+            </button>
+          </div>
+
+          <div id="add-details" class="hidden space-y-2.5 pl-1 pr-1">
+            <div>
+              <label for="todo-description" class="block text-xs font-medium text-muted-foreground mb-1">Deskripsi</label>
+              <textarea
+                id="todo-description"
+                rows="2"
+                placeholder="Deskripsi tugas..."
+                class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 placeholder:text-muted-foreground px-3 py-2 text-sm resize-none"
+              ></textarea>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2.5">
+              <div>
+                <label for="todo-deadline" class="block text-xs font-medium text-muted-foreground mb-1">Tenggat</label>
+                <input
+                  id="todo-deadline"
+                  type="date"
+                  class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 h-9 px-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label for="todo-status" class="block text-xs font-medium text-muted-foreground mb-1">Status</label>
+                <select
+                  id="todo-status"
+                  class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 h-9 px-2.5 text-sm"
+                >
+                  <option value="todo">Belum</option>
+                  <option value="in_progress">Diproses</option>
+                  <option value="done">Selesai</option>
+                </select>
+              </div>
+              <div>
+                <label for="todo-priority" class="block text-xs font-medium text-muted-foreground mb-1">Prioritas</label>
+                <select
+                  id="todo-priority"
+                  class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 h-9 px-2.5 text-sm"
+                >
+                  <option value="low">Rendah</option>
+                  <option value="medium" selected>Sedang</option>
+                  <option value="high">Tinggi</option>
+                </select>
+              </div>
+            </div>
           </div>
         </form>
 
-        <div id="filter-bar" class="flex gap-1.5 mb-4 p-1 bg-muted rounded-md"></div>
+        <div
+          id="filter-bar"
+          class="flex gap-1.5 mb-4 p-1 bg-muted rounded-md"
+        ></div>
 
-        <ul id="todo-list" class="list-none p-0 m-0 flex flex-col gap-1 mb-4"></ul>
+        <ul
+          id="todo-list"
+          class="list-none p-0 m-0 flex flex-col gap-1 mb-4"
+        ></ul>
 
-        <footer id="todo-footer" class="flex items-center justify-between pt-3.5 border-t border-border"></footer>
+        <footer
+          id="todo-footer"
+          class="flex items-center justify-between pt-3.5 border-t border-border"
+        ></footer>
       </main>
-    </Card>
+    </div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div
+    id="edit-modal-overlay"
+    class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm hidden items-center justify-center p-4"
+  >
+    <div
+      class="bg-card text-card-foreground ring-border w-full max-w-[480px] rounded-xl ring-1 shadow-2xl animate-slideIn"
+    >
+      <div class="flex items-center justify-between px-6 pt-6 pb-3">
+        <h2 class="text-lg font-semibold text-foreground">Edit Tugas</h2>
+        <button
+          type="button"
+          id="modal-close-btn"
+          class="flex items-center justify-center size-8 border-none bg-transparent rounded-md cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-200"
+          aria-label="Tutup"
+          onclick="document.getElementById('edit-modal-overlay').classList.add('hidden'); document.getElementById('edit-modal-overlay').classList.remove('flex');"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <form id="edit-modal-form" data-id="">
+        <div class="px-6 space-y-3.5 pb-6">
+          <div>
+            <label for="edit-title" class="block text-sm font-medium text-foreground mb-1">Judul</label>
+            <input
+              id="edit-title"
+              type="text"
+              required
+              autocomplete="off"
+              class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 placeholder:text-muted-foreground h-10 px-3 text-sm"
+            />
+          </div>
+
+          <div>
+            <label for="edit-description" class="block text-sm font-medium text-foreground mb-1">Deskripsi</label>
+            <textarea
+              id="edit-description"
+              rows="3"
+              class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 placeholder:text-muted-foreground px-3 py-2 text-sm resize-none"
+            ></textarea>
+          </div>
+
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label for="edit-deadline" class="block text-sm font-medium text-foreground mb-1">Tenggat</label>
+              <input
+                id="edit-deadline"
+                type="date"
+                class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 h-10 px-2.5 text-sm"
+              />
+            </div>
+            <div>
+              <label for="edit-status" class="block text-sm font-medium text-foreground mb-1">Status</label>
+              <select
+                id="edit-status"
+                class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 h-10 px-2.5 text-sm"
+              >
+                <option value="todo">Belum</option>
+                <option value="in_progress">Diproses</option>
+                <option value="done">Selesai</option>
+              </select>
+            </div>
+            <div>
+              <label for="edit-priority" class="block text-sm font-medium text-foreground mb-1">Prioritas</label>
+              <select
+                id="edit-priority"
+                class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 h-10 px-2.5 text-sm"
+              >
+                <option value="low">Rendah</option>
+                <option value="medium">Sedang</option>
+                <option value="high">Tinggi</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 rounded-b-xl border-t border-border px-6 py-4">
+          <button
+            type="button"
+            class="inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-all outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 dark:border-input focus-visible:ring-outline/50 bg-background dark:bg-input/30 focus-visible:border-outline hover:bg-muted dark:hover:bg-input/50 hover:text-foreground border shadow-xs h-9 px-4 text-sm"
+            onclick="document.getElementById('edit-modal-overlay').classList.add('hidden'); document.getElementById('edit-modal-overlay').classList.remove('flex');"
+          >
+            Batal
+          </button>
+          <button
+            type="submit"
+            class="inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-all outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-primary/50 h-9 px-4 text-sm"
+          >
+            Simpan
+          </button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <script src="/src/scripts/app.ts" type="module"></script>
