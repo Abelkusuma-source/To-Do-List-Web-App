@@ -1,0 +1,29 @@
+---
+export interface Props {
+  title?: string;
+  description?: string;
+}
+
+import "@/styles/starwind.css";
+
+const { title = 'Catatan Tugas', description = 'Aplikasi Catatan Tugas - Kelola tugas harian Anda' } = Astro.props;
+---
+
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+    <script>
+      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.documentElement.classList.add('dark');
+      }
+    </script>
+    <slot name="head" />
+  </head>
+  <body class="min-h-dvh flex justify-center">
+    <slot />
+  </body>
+</html>
