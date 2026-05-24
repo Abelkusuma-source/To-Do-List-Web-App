@@ -14,6 +14,9 @@ dist-ssr
 
 # Environment variables
 .env
+.env.production
+.env.local
+.env.*.local
 
 # Drizzle migrations
 migrations/

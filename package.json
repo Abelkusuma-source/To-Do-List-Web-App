@@ -6,13 +6,19 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "migrate": "drizzle-kit migrate",
+    "migrate:prod": "npx dotenv -e .env.production -- drizzle-kit migrate",
+    "push": "drizzle-kit push",
+    "push:prod": "npx dotenv -e .env.production -- drizzle-kit push",
+    "generate": "drizzle-kit generate"
   },
   "overrides": {
     "vite": "^7.0.0"
   },
   "devDependencies": {
     "@astrojs/node": "^10.1.1",
+    "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.10",
     "typescript": "~6.0.2"
   },
