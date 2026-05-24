@@ -9,12 +9,12 @@ import {
   PRIORITY_LABELS,
   STATUS_LABELS,
 } from "./todo";
+import { authClient } from "../lib/auth-client";
 
 let todos: Todo[] = [];
 let currentFilter: Filter = "all";
 let addFormExpanded = false;
 let editingId: string | null = null;
-
 // DOM refs
 let inputEl: HTMLInputElement | null = null;
 let descriptionEl: HTMLTextAreaElement | null = null;
@@ -27,7 +27,7 @@ let filterEl: HTMLElement | null = null;
 let modalOverlayEl: HTMLElement | null = null;
 let modalFormEl: HTMLFormElement | null = null;
 let expandBtnEl: HTMLElement | null = null;
-
+let logoutBtnEl: HTMLElement | null = null;
 
 // Modal sub-refs
 let editThumbnailContainerEl: HTMLElement | null = null;
@@ -696,6 +696,20 @@ function setupDragDropZone(): void {
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
+// ─── Auth Handling ───────────────────────────────────────────────────────────
+
+async function handleLogout(): Promise<void> {
+  await authClient.signOut({
+    fetchOptions: {
+      onSuccess: () => {
+        window.location.href = "/login";
+      },
+    },
+  });
+}
+
+// ─── Init ────────────────────────────────────────────────────────────────────
+
 function init(): void {
   inputEl = document.getElementById("todo-input") as HTMLInputElement;
   descriptionEl = document.getElementById("todo-description") as HTMLTextAreaElement;
@@ -708,7 +722,7 @@ function init(): void {
   modalOverlayEl = document.getElementById("edit-modal-overlay")!;
   modalFormEl = document.getElementById("edit-modal-form") as HTMLFormElement;
   expandBtnEl = document.getElementById("expand-btn");
-
+  logoutBtnEl = document.getElementById("logout-btn");
 
   // Modal sub-refs
   editThumbnailContainerEl = document.getElementById("edit-thumbnail-container");
@@ -733,6 +747,10 @@ function init(): void {
 
   if (expandBtnEl) {
     expandBtnEl.addEventListener("click", toggleAddFormExpanded);
+  }
+
+  if (logoutBtnEl) {
+    logoutBtnEl.addEventListener("click", handleLogout);
   }
 
   // Thumbnail input
@@ -770,6 +788,7 @@ function init(): void {
   setupThumbnailDropZone();
   setupDragDropZone();
 
+  // Fetch todos
   fetchTodos();
 }
 

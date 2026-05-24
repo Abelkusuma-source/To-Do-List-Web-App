@@ -1,11 +1,25 @@
 import { defineAction } from "astro:actions";
 import { z } from "astro:schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 import { db } from "../db";
 import { todosTable, taskAttachmentsTable } from "../db/schema";
 import { storage } from "../lib/storage";
+import { auth } from "../lib/auth";
 import type { Todo, TaskAttachment } from "../scripts/todo";
+import type { ActionAPIContext } from "astro:actions";
+
+// ─── Helper: Get authenticated user ─────────────────────────────────────────
+
+async function requireAuth(context: ActionAPIContext): Promise<string> {
+  const session = await auth.api.getSession({
+    headers: context.request.headers,
+  });
+  if (!session?.user?.id) {
+    throw new Error("Unauthorized: Silakan login terlebih dahulu.");
+  }
+  return session.user.id;
+}
 
 // ─── Validation Helpers ──────────────────────────────────────────────────────
 
@@ -37,10 +51,12 @@ function storageKeyFromUrl(url: string): string {
 export const server = {
   getTodos: defineAction({
     input: z.void(),
-    handler: async () => {
+    handler: async (_input, context) => {
+      const userId = await requireAuth(context);
       const todos = await db
         .select()
         .from(todosTable)
+        .where(eq(todosTable.userId, userId))
         .orderBy(todosTable.createdAt);
       return todos as Todo[];
     },
@@ -54,7 +70,8 @@ export const server = {
       priority: z.enum(["low", "medium", "high"]).default("medium"),
       deadline: z.string().nullable().optional(),
     }),
-    handler: async (input) => {
+    handler: async (input, context) => {
+      const userId = await requireAuth(context);
       const now = Date.now();
       const todo = {
         id: crypto.randomUUID(),
@@ -65,6 +82,7 @@ export const server = {
         priority: input.priority,
         deadline: input.deadline || null,
         thumbnailUrl: null as string | null,
+        userId,
         createdAt: now,
         updatedAt: now,
       };
@@ -84,13 +102,15 @@ export const server = {
       deadline: z.string().nullable().optional(),
       thumbnailUrl: z.string().nullable().optional(),
     }),
-    handler: async (input) => {
+    handler: async (input, context) => {
+      const userId = await requireAuth(context);
       const { id, ...updates } = input;
 
+      // Only update if the todo belongs to this user
       await db
         .update(todosTable)
         .set({ ...updates, updatedAt: Date.now() })
-        .where(eq(todosTable.id, id));
+        .where(and(eq(todosTable.id, id), eq(todosTable.userId, userId)));
 
       const [todo] = await db
         .select()
@@ -102,12 +122,14 @@ export const server = {
 
   deleteTodo: defineAction({
     input: z.object({ id: z.string() }),
-    handler: async ({ id }) => {
-      // Get todo to clean up thumbnail
+    handler: async ({ id }, context) => {
+      const userId = await requireAuth(context);
+
+      // Get todo to verify ownership and clean up thumbnail
       const [todo] = await db
         .select()
         .from(todosTable)
-        .where(eq(todosTable.id, id));
+        .where(and(eq(todosTable.id, id), eq(todosTable.userId, userId)));
 
       if (!todo) return { success: false };
 
@@ -142,12 +164,14 @@ export const server = {
 
   clearCompleted: defineAction({
     input: z.void(),
-    handler: async () => {
-      // Get completed todos
+    handler: async (_input, context) => {
+      const userId = await requireAuth(context);
+
+      // Get completed todos for this user
       const completedTodos = await db
         .select()
         .from(todosTable)
-        .where(eq(todosTable.done, true));
+        .where(and(eq(todosTable.done, true), eq(todosTable.userId, userId)));
 
       // Clean up thumbnails
       for (const todo of completedTodos) {
@@ -176,7 +200,7 @@ export const server = {
       }
 
       // Delete completed todos (cascade deletes attachments from DB)
-      await db.delete(todosTable).where(eq(todosTable.done, true));
+      await db.delete(todosTable).where(and(eq(todosTable.done, true), eq(todosTable.userId, userId)));
       return { success: true };
     },
   }),
@@ -189,7 +213,9 @@ export const server = {
       taskId: z.string(),
       file: z.instanceof(File),
     }),
-    handler: async (input) => {
+    handler: async (input, context) => {
+      const userId = await requireAuth(context);
+
       // Validate file type
       if (!ALLOWED_IMAGE_TYPES.includes(input.file.type)) {
         throw new Error(
@@ -204,11 +230,11 @@ export const server = {
 
       const buffer = await input.file.arrayBuffer();
 
-      // Get existing thumbnail to delete it
+      // Get existing thumbnail to delete it (verify ownership)
       const [todo] = await db
         .select()
         .from(todosTable)
-        .where(eq(todosTable.id, input.taskId));
+        .where(and(eq(todosTable.id, input.taskId), eq(todosTable.userId, userId)));
 
       // Delete old thumbnail if exists
       if (todo?.thumbnailUrl) {
@@ -239,11 +265,13 @@ export const server = {
 
   deleteThumbnail: defineAction({
     input: z.object({ taskId: z.string() }),
-    handler: async (input) => {
+    handler: async (input, context) => {
+      const userId = await requireAuth(context);
+
       const [todo] = await db
         .select()
         .from(todosTable)
-        .where(eq(todosTable.id, input.taskId));
+        .where(and(eq(todosTable.id, input.taskId), eq(todosTable.userId, userId)));
 
       if (todo?.thumbnailUrl) {
         try {
@@ -270,7 +298,19 @@ export const server = {
       taskId: z.string(),
       file: z.instanceof(File),
     }),
-    handler: async (input) => {
+    handler: async (input, context) => {
+      const userId = await requireAuth(context);
+
+      // Verify todo ownership
+      const [todo] = await db
+        .select({ id: todosTable.id })
+        .from(todosTable)
+        .where(and(eq(todosTable.id, input.taskId), eq(todosTable.userId, userId)));
+
+      if (!todo) {
+        throw new Error("Tugas tidak ditemukan.");
+      }
+
       // Validate file type
       if (!ALLOWED_ATTACHMENT_TYPES.includes(input.file.type)) {
         throw new Error(
@@ -313,7 +353,19 @@ export const server = {
 
   getAttachments: defineAction({
     input: z.object({ taskId: z.string() }),
-    handler: async (input) => {
+    handler: async (input, context) => {
+      const userId = await requireAuth(context);
+
+      // Verify todo ownership
+      const [todo] = await db
+        .select({ id: todosTable.id })
+        .from(todosTable)
+        .where(and(eq(todosTable.id, input.taskId), eq(todosTable.userId, userId)));
+
+      if (!todo) {
+        throw new Error("Tugas tidak ditemukan.");
+      }
+
       const attachments = await db
         .select()
         .from(taskAttachmentsTable)
@@ -326,7 +378,9 @@ export const server = {
 
   deleteAttachment: defineAction({
     input: z.object({ attachmentId: z.string() }),
-    handler: async (input) => {
+    handler: async (input, context) => {
+      const userId = await requireAuth(context);
+
       const [attachment] = await db
         .select({
           id: taskAttachmentsTable.id,
@@ -338,6 +392,16 @@ export const server = {
 
       if (!attachment) {
         throw new Error("Lampiran tidak ditemukan.");
+      }
+
+      // Verify todo ownership
+      const [todo] = await db
+        .select({ id: todosTable.id })
+        .from(todosTable)
+        .where(and(eq(todosTable.id, attachment.taskId), eq(todosTable.userId, userId)));
+
+      if (!todo) {
+        throw new Error("Tugas tidak ditemukan.");
       }
 
       try {
@@ -356,7 +420,9 @@ export const server = {
 
   downloadAttachment: defineAction({
     input: z.object({ attachmentId: z.string() }),
-    handler: async (input) => {
+    handler: async (input, context) => {
+      const userId = await requireAuth(context);
+
       const [attachment] = await db
         .select()
         .from(taskAttachmentsTable)
@@ -364,6 +430,16 @@ export const server = {
 
       if (!attachment) {
         throw new Error("Lampiran tidak ditemukan.");
+      }
+
+      // Verify todo ownership
+      const [todo] = await db
+        .select({ id: todosTable.id })
+        .from(todosTable)
+        .where(and(eq(todosTable.id, attachment.taskId), eq(todosTable.userId, userId)));
+
+      if (!todo) {
+        throw new Error("Tugas tidak ditemukan.");
       }
 
       return attachment as TaskAttachment;
