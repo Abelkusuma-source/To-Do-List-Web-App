@@ -18,6 +18,10 @@ export interface TaskAttachment {
   fileUrl: string;
   fileSize: number;
   mimeType: string;
+  fileExtension?: string | null;
+  imageWidth?: number | null;
+  imageHeight?: number | null;
+  placeholderBlur?: string | null;
   createdAt: number;
   updatedAt: number;
 }

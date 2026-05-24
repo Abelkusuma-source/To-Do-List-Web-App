@@ -6,6 +6,8 @@ import { db } from "../db";
 import { todosTable, taskAttachmentsTable } from "../db/schema";
 import { storage } from "../lib/storage";
 import { auth } from "../lib/auth";
+import { processThumbnail, generateBlurPlaceholder, isValidImageBuffer } from "../lib/image";
+import { checkQuota, addStorageUsage, removeStorageUsage, getStorageQuota } from "../lib/quota";
 import type { Todo, TaskAttachment } from "../scripts/todo";
 import type { ActionAPIContext } from "astro:actions";
 
@@ -134,6 +136,7 @@ export const server = {
       if (!todo) return { success: false };
 
       // Clean up thumbnail from storage
+      let totalFreedBytes = 0;
       if (todo.thumbnailUrl) {
         try {
           await storage.delete(storageKeyFromUrl(todo.thumbnailUrl));
@@ -142,18 +145,24 @@ export const server = {
         }
       }
 
-      // Clean up attachments from storage
+      // Clean up attachments from storage & track freed space
       const attachments = await db
         .select()
         .from(taskAttachmentsTable)
         .where(eq(taskAttachmentsTable.taskId, id));
 
       for (const att of attachments) {
+        totalFreedBytes += att.fileSize;
         try {
           await storage.delete(storageKeyFromUrl(att.fileUrl));
         } catch {
           // ignore storage errors during cleanup
         }
+      }
+
+      // Update quota
+      if (totalFreedBytes > 0) {
+        await removeStorageUsage(userId, totalFreedBytes, attachments.length > 0);
       }
 
       // Delete todo (cascade deletes attachments from DB)
@@ -173,7 +182,9 @@ export const server = {
         .from(todosTable)
         .where(and(eq(todosTable.done, true), eq(todosTable.userId, userId)));
 
-      // Clean up thumbnails
+      // Clean up thumbnails & track freed space
+      let totalFreedBytes = 0;
+      let totalFilesRemoved = 0;
       for (const todo of completedTodos) {
         if (todo.thumbnailUrl) {
           try {
@@ -191,12 +202,19 @@ export const server = {
           .from(taskAttachmentsTable)
           .where(eq(taskAttachmentsTable.taskId, todo.id));
         for (const att of attachments) {
+          totalFreedBytes += att.fileSize;
+          totalFilesRemoved++;
           try {
             await storage.delete(storageKeyFromUrl(att.fileUrl));
           } catch {
             // ignore
           }
         }
+      }
+
+      // Update quota
+      if (totalFreedBytes > 0) {
+        await removeStorageUsage(userId, totalFreedBytes, totalFilesRemoved > 0);
       }
 
       // Delete completed todos (cascade deletes attachments from DB)
@@ -230,6 +248,14 @@ export const server = {
 
       const buffer = await input.file.arrayBuffer();
 
+      // Validate file content via magic bytes (defense-in-depth)
+      if (!isValidImageBuffer(buffer)) {
+        throw new Error("File tidak valid atau rusak.");
+      }
+
+      // Check storage quota
+      await checkQuota(userId, input.file.size);
+
       // Get existing thumbnail to delete it (verify ownership)
       const [todo] = await db
         .select()
@@ -245,21 +271,38 @@ export const server = {
         }
       }
 
-      // Upload new thumbnail
+      // Process image: resize + convert to WebP
+      const processed = await processThumbnail(buffer);
+
+      // Generate blur-up placeholder
+      const placeholder = await generateBlurPlaceholder(processed.buffer);
+
+      // Upload optimized thumbnail (always WebP)
       const uploaded = await storage.upload({
-        buffer,
-        fileName: input.file.name,
-        mimeType: input.file.type,
+        buffer: processed.buffer,
+        fileName: `${input.file.name.replace(/\.[^.]+$/, "")}.${processed.extension}`,
+        mimeType: processed.mimeType,
         directory: "thumbnails",
       });
 
-      // Update todo with thumbnail URL
+      // Update quota
+      await addStorageUsage(userId, processed.size, !todo?.thumbnailUrl);
+
+      // Store placeholder as a data attribute or compute URL for CSS
       await db
         .update(todosTable)
-        .set({ thumbnailUrl: uploaded.url, updatedAt: Date.now() })
+        .set({
+          thumbnailUrl: uploaded.url,
+          updatedAt: Date.now(),
+        })
         .where(eq(todosTable.id, input.taskId));
 
-      return { url: uploaded.url };
+      return {
+        url: uploaded.url,
+        placeholder: placeholder.base64,
+        width: processed.width,
+        height: processed.height,
+      };
     },
   }),
 
@@ -273,12 +316,12 @@ export const server = {
         .from(todosTable)
         .where(and(eq(todosTable.id, input.taskId), eq(todosTable.userId, userId)));
 
-      if (todo?.thumbnailUrl) {
-        try {
-          await storage.delete(storageKeyFromUrl(todo.thumbnailUrl));
-        } catch {
-          // ignore
-        }
+      if (!todo?.thumbnailUrl) return { success: true };
+
+      try {
+        await storage.delete(storageKeyFromUrl(todo.thumbnailUrl));
+      } catch {
+        // ignore
       }
 
       await db
@@ -323,7 +366,31 @@ export const server = {
         throw new Error("Ukuran file maksimal 20MB.");
       }
 
+      // Check storage quota
+      await checkQuota(userId, input.file.size);
+
       const buffer = await input.file.arrayBuffer();
+
+      // Get image dimensions if this is an image
+      let imageWidth: number | null = null;
+      let imageHeight: number | null = null;
+      let placeholderBlur: string | null = null;
+      const ext = input.file.name.split(".").pop()?.toLowerCase() ?? null;
+
+      if (input.file.type.startsWith("image/") && buffer.byteLength > 0) {
+        try {
+          // Only extract metadata for images < 10MB
+          if (buffer.byteLength < 10 * 1024 * 1024) {
+            const processed = await processThumbnail(buffer, { maxWidth: 300, maxHeight: 300, quality: 70 });
+            imageWidth = processed.width;
+            imageHeight = processed.height;
+            const placeholder = await generateBlurPlaceholder(buffer);
+            placeholderBlur = placeholder.base64;
+          }
+        } catch {
+          // Non-critical — skip image metadata
+        }
+      }
 
       // Upload file
       const uploaded = await storage.upload({
@@ -333,6 +400,9 @@ export const server = {
         directory: "attachments",
       });
 
+      // Update quota
+      await addStorageUsage(userId, input.file.size, true);
+
       const now = Date.now();
       const attachment = {
         id: crypto.randomUUID(),
@@ -341,6 +411,10 @@ export const server = {
         fileUrl: uploaded.url,
         fileSize: input.file.size,
         mimeType: input.file.type,
+        fileExtension: ext,
+        imageWidth,
+        imageHeight,
+        placeholderBlur,
         createdAt: now,
         updatedAt: now,
       };
@@ -386,6 +460,7 @@ export const server = {
           id: taskAttachmentsTable.id,
           taskId: taskAttachmentsTable.taskId,
           fileUrl: taskAttachmentsTable.fileUrl,
+          fileSize: taskAttachmentsTable.fileSize,
         })
         .from(taskAttachmentsTable)
         .where(eq(taskAttachmentsTable.id, input.attachmentId));
@@ -413,6 +488,9 @@ export const server = {
       await db
         .delete(taskAttachmentsTable)
         .where(eq(taskAttachmentsTable.id, input.attachmentId));
+
+      // Update quota
+      await removeStorageUsage(userId, attachment.fileSize, true);
 
       return { success: true };
     },
@@ -443,6 +521,16 @@ export const server = {
       }
 
       return attachment as TaskAttachment;
+    },
+  }),
+
+  // ─── Storage Quota ──────────────────────────────────────────────────────────
+
+  getStorageQuota: defineAction({
+    input: z.void(),
+    handler: async (_input, context) => {
+      const userId = await requireAuth(context);
+      return getStorageQuota(userId);
     },
   }),
 };

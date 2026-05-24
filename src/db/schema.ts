@@ -86,6 +86,31 @@ export const taskAttachmentsTable = sqliteTable("task_attachments", {
   fileUrl: text("file_url").notNull(),
   fileSize: integer("file_size").notNull(),
   mimeType: text("mime_type").notNull(),
+  /** Original file extension (e.g. ".jpg", ".pdf") */
+  fileExtension: text("file_extension"),
+  /** Width in pixels (for images) */
+  imageWidth: integer("image_width"),
+  /** Height in pixels (for images) */
+  imageHeight: integer("image_height"),
+  /** Blur-up placeholder base64 (for images) */
+  placeholderBlur: text("placeholder_blur"),
   createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+// ─── Storage Usage Table ─────────────────────────────────────────────────────
+
+export const storageUsageTable = sqliteTable("storage_usage", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .unique()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** Total bytes used across all files */
+  totalBytes: integer("total_bytes").notNull().default(0),
+  /** Number of files stored */
+  fileCount: integer("file_count").notNull().default(0),
+  /** Max allowed bytes (soft limit) */
+  quotaBytes: integer("quota_bytes").notNull().default(100 * 1024 * 1024), // 100MB default
   updatedAt: integer("updated_at").notNull(),
 });

@@ -314,35 +314,279 @@ async function handleListClick(e: MouseEvent): Promise<void> {
   }
 }
 
-// ─── Thumbnail & Attachment Upload ───────────────────────────────────────────
+// ─── Image Compression (Client-Side) ─────────────────────────────────────────
 
-async function uploadThumbnail(taskId: string, file: File): Promise<void> {
-  if (!editThumbnailContainerEl) return;
+/**
+ * Compress an image file on the client before uploading.
+ * Uses a canvas to downscale large images, reducing upload size and speed.
+ * Returns a compressed blob that's typically 60-80% smaller than the original.
+ */
+function compressImage(file: File, maxDimension: number = 1200, quality: number = 0.8): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
 
-  // Show loading state
-  editThumbnailContainerEl.innerHTML = `
-    <div class="flex items-center justify-center py-6 text-muted-foreground">
-      <svg class="animate-spin size-5 mr-2" viewBox="0 0 24 24" fill="none">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-      </svg>
-      <span class="text-sm">Mengunggah...</span>
+      let { width, height } = img;
+
+      // Only downscale if larger than max dimension
+      if (width <= maxDimension && height <= maxDimension) {
+        // File is already small enough, return as-is (but maybe re-encode for WebP)
+        // Just return the original file if it's already WebP
+        if (file.type === "image/webp") {
+          resolve(file);
+          return;
+        }
+      }
+
+      // Maintain aspect ratio
+      if (width > height && width > maxDimension) {
+        height = Math.round((height * maxDimension) / width);
+        width = maxDimension;
+      } else if (height > maxDimension) {
+        width = Math.round((width * maxDimension) / height);
+        height = maxDimension;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d")!;
+
+      // Use bilinear interpolation for smoother downscaling
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Convert to WebP for best compression
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            // Fallback: resolve original file
+            resolve(file);
+          }
+        },
+        "image/webp",
+        quality,
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Gagal memproses gambar"));
+    };
+    img.src = url;
+  });
+}
+
+/**
+ * Compress an image file and return a new File with WebP extension.
+ */
+async function compressImageFile(file: File): Promise<File> {
+  // Only compress images, skip non-image files
+  if (!file.type.startsWith("image/")) return file;
+
+  // Skip GIFs (animation would be lost)
+  if (file.type === "image/gif") return file;
+
+  // Small files (< 100KB) — skip compression overhead
+  if (file.size < 100 * 1024) return file;
+
+  try {
+    const compressed = await compressImage(file);
+    const newName = file.name.replace(/\.[^.]+$/, "") + ".webp";
+    return new File([compressed], newName, { type: "image/webp" });
+  } catch {
+    return file; // Fallback to original
+  }
+}
+
+// ─── Upload Queue ────────────────────────────────────────────────────────────
+
+interface QueueTask {
+  id: string;
+  type: "thumbnail" | "attachment";
+  file: File;
+  taskId: string;
+  status: "pending" | "uploading" | "done" | "error";
+  progress: number; // 0-100
+  error?: string;
+}
+
+let uploadQueue: QueueTask[] = [];
+let activeUploads = 0;
+const MAX_CONCURRENT_UPLOADS = 2;
+
+function addUploadProgressEl(task: QueueTask): string {
+  // Create a unique ID for the progress bar
+  return `upload-progress-${task.id}`;
+}
+
+function renderUploadProgress(task: QueueTask): string {
+  const barId = addUploadProgressEl(task);
+  const fileName = task.file.name.length > 30
+    ? task.file.name.slice(0, 27) + "…"
+    : task.file.name;
+
+  const icon = task.type === "thumbnail" ? "🖼️" : "📎";
+
+  return `
+    <div class="flex items-center gap-2.5 px-3 py-2 rounded-md bg-muted/50" data-upload-id="${task.id}">
+      <span class="text-sm shrink-0">${icon}</span>
+      <div class="flex-1 min-w-0">
+        <div class="flex justify-between items-center mb-1">
+          <span class="text-xs text-foreground truncate">${escapeHtml(fileName)}</span>
+          <span class="text-[10px] text-muted-foreground shrink-0 ml-2">${task.status === "uploading" ? task.progress + "%" : task.status === "done" ? "✓" : task.status === "error" ? "✗" : "..."}</span>
+        </div>
+        <div class="w-full h-1.5 bg-border rounded-full overflow-hidden">
+          <div class="h-full rounded-full transition-all duration-300 ease-out ${
+            task.status === "done"
+              ? "bg-success"
+              : task.status === "error"
+                ? "bg-error"
+                : "bg-primary"
+          }" style="width: ${task.progress}%"></div>
+        </div>
+        ${task.error ? `<p class="text-[10px] text-error mt-1">${escapeHtml(task.error)}</p>` : ""}
+      </div>
     </div>
   `;
+}
 
-  const fd = new FormData();
-  fd.set("taskId", taskId);
-  fd.set("file", file);
-  const { data, error } = await actions.uploadThumbnail(fd);
+function processQueue(): void {
+  while (activeUploads < MAX_CONCURRENT_UPLOADS && uploadQueue.some((t) => t.status === "pending")) {
+    const task = uploadQueue.find((t) => t.status === "pending")!;
+    activeUploads++;
+    task.status = "uploading";
 
-  if (error) {
-    console.error("Failed to upload thumbnail:", error);
-    renderThumbnailPreview(taskId, null);
-    return;
+    // Update progress display
+    renderUploadProgressBar();
+
+    // Execute the upload
+    executeUpload(task).finally(() => {
+      activeUploads--;
+      processQueue();
+    });
+  }
+}
+
+function renderUploadProgressBar(): void {
+  if (!editAttachmentsListEl) return;
+
+  const activeTasks = uploadQueue.filter((t) => t.status !== "done");
+  if (activeTasks.length === 0) return;
+
+  // Find or create progress container
+  let progressContainer = document.getElementById("upload-progress-container");
+  if (!progressContainer) {
+    progressContainer = document.createElement("div");
+    progressContainer.id = "upload-progress-container";
+    progressContainer.className = "space-y-1 mb-2";
+    editAttachmentsListEl.parentElement?.insertBefore(
+      progressContainer,
+      editAttachmentsListEl,
+    );
   }
 
-  renderThumbnailPreview(taskId, data?.url ?? null);
-  await fetchTodos();
+  progressContainer.innerHTML = activeTasks
+    .map((t) => renderUploadProgress(t))
+    .join("");
+}
+
+function clearCompletedUploads(): void {
+  uploadQueue = uploadQueue.filter((t) => t.status === "pending" || t.status === "uploading");
+  const container = document.getElementById("upload-progress-container");
+  if (container && uploadQueue.length === 0) {
+    container.remove();
+  }
+}
+
+async function executeUpload(task: QueueTask): Promise<void> {
+  try {
+    // Compress image before upload (client-side)
+    const fileToUpload = task.type === "thumbnail"
+      ? await compressImageFile(task.file)
+      : task.file.type.startsWith("image/")
+        ? await compressImageFile(task.file)
+        : task.file;
+
+    const fd = new FormData();
+    fd.set("taskId", task.taskId);
+    fd.set("file", fileToUpload);
+
+    let result: { data?: any; error?: any };
+
+    // Use indeterminate progress indicator (Astro Actions use fetch which
+    // doesn't support real upload progress tracking via XHR)
+    // Set progress to indeterminate state
+    task.progress = 50; // "processing" state
+    renderUploadProgressBar();
+
+    if (task.type === "thumbnail") {
+      result = await actions.uploadThumbnail(fd);
+
+      if (result.error) {
+        throw new Error(result.error.message || "Gagal mengunggah thumbnail");
+      }
+
+      task.progress = 100;
+
+      // Update preview with returned URL
+      renderThumbnailPreview(task.taskId, result.data?.url ?? null);
+    } else {
+      result = await actions.uploadAttachment(fd);
+
+      if (result.error) {
+        throw new Error(result.error.message || "Gagal mengunggah lampiran");
+      }
+
+      task.progress = 100;
+
+      await loadAttachments(task.taskId);
+    }
+
+    task.status = "done";
+    renderUploadProgressBar();
+
+    // Clean up completed after a short delay
+    setTimeout(clearCompletedUploads, 2000);
+
+    if (task.type === "thumbnail") {
+      await fetchTodos();
+    }
+  } catch (err) {
+    task.status = "error";
+    task.error = err instanceof Error ? err.message : "Terjadi kesalahan";
+    renderUploadProgressBar();
+  }
+}
+
+function queueUpload(type: "thumbnail" | "attachment", taskId: string, file: File): void {
+  const task: QueueTask = {
+    id: crypto.randomUUID(),
+    type,
+    file,
+    taskId,
+    status: "pending",
+    progress: 0,
+  };
+
+  uploadQueue.push(task);
+  renderUploadProgressBar();
+  processQueue();
+}
+
+// ─── Thumbnail Upload ────────────────────────────────────────────────────────
+
+async function uploadThumbnail(taskId: string, file: File): Promise<void> {
+  // Show instant blob preview before upload
+  const blobUrl = URL.createObjectURL(file);
+  renderThumbnailPreview(taskId, blobUrl);
+
+  // Queue the upload (will be compressed & processed)
+  queueUpload("thumbnail", taskId, file);
 }
 
 function renderThumbnailPreview(taskId: string, url: string | null): void {
@@ -368,6 +612,8 @@ function renderThumbnailPreview(taskId: string, url: string | null): void {
       editThumbnailInputEl?.click();
     });
     editThumbnailContainerEl.querySelector("[data-thumbnail-action='delete']")?.addEventListener("click", async () => {
+      // Revoke blob URL if it's a temporary one
+      if (url.startsWith("blob:")) URL.revokeObjectURL(url);
       const { error } = await actions.deleteThumbnail({ taskId });
       if (error) {
         console.error("Failed to delete thumbnail:", error);
@@ -680,16 +926,7 @@ function setupDragDropZone(): void {
         continue;
       }
 
-      const afd = new FormData();
-      afd.set("taskId", taskId);
-      afd.set("file", file);
-      const { error } = await actions.uploadAttachment(afd);
-      if (error) {
-        console.error("Failed to upload attachment:", error);
-        continue;
-      }
-
-      await loadAttachments(taskId);
+      queueUpload("attachment", taskId, file);
     }
   });
 }
@@ -770,15 +1007,7 @@ function init(): void {
       if (!taskId || !editAttachmentInputEl.files) return;
       for (let i = 0; i < editAttachmentInputEl.files.length; i++) {
         const file = editAttachmentInputEl.files[i];
-        const afd = new FormData();
-        afd.set("taskId", taskId);
-        afd.set("file", file);
-        const { error } = await actions.uploadAttachment(afd);
-        if (error) {
-          console.error("Failed to upload attachment:", error);
-          continue;
-        }
-        await loadAttachments(taskId);
+        queueUpload("attachment", taskId, file);
       }
       editAttachmentInputEl.value = "";
     });

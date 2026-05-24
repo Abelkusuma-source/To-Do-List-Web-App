@@ -50,6 +50,8 @@ interface StorageConfig {
   r2SecretAccessKey?: string;
   /** Public bucket URL for serving files directly */
   r2PublicUrl?: string;
+  /** Domain for presigned URLs */
+  publicDomain?: string;
 }
 
 function getConfig(): StorageConfig {
@@ -65,6 +67,7 @@ function getConfig(): StorageConfig {
     r2AccessKeyId: import.meta.env.R2_ACCESS_KEY_ID,
     r2SecretAccessKey: import.meta.env.R2_SECRET_ACCESS_KEY,
     r2PublicUrl: import.meta.env.R2_PUBLIC_URL,
+    publicDomain: import.meta.env.PUBLIC_DOMAIN || import.meta.env.BETTER_AUTH_URL,
   };
 }
 
@@ -102,6 +105,30 @@ async function deleteLocal(key: string): Promise<void> {
   } catch {
     // File may not exist, ignore
   }
+}
+
+// ─── Cache & Content-Disposition Helpers ─────────────────────────────────────
+
+/** Get appropriate Cache-Control header based on directory and file type */
+function getCacheControl(directory: string, _mimeType: string): string {
+  switch (directory) {
+    case "thumbnails":
+      // Thumbnails are content-addressable (random UUID names) → cache forever
+      return "public, max-age=31536000, immutable";
+    case "attachments":
+      return "private, max-age=3600";
+    default:
+      return "public, max-age=86400";
+  }
+}
+
+/** Get Content-Disposition header: force download for attachments, inline for thumbnails */
+function getContentDisposition(directory: string, fileName: string): string {
+  const encoded = encodeURIComponent(fileName);
+  if (directory === "attachments") {
+    return `attachment; filename*=UTF-8''${encoded}`;
+  }
+  return `inline; filename*=UTF-8''${encoded}`;
 }
 
 // ─── R2/S3-Compatible Storage ────────────────────────────────────────────────
@@ -142,6 +169,8 @@ async function uploadR2(options: UploadOptions): Promise<StorageFile> {
       Key: key,
       Body: Buffer.from(options.buffer),
       ContentType: options.mimeType,
+      CacheControl: getCacheControl(options.directory, options.mimeType),
+      ContentDisposition: getContentDisposition(options.directory, options.fileName),
     }),
   );
 
@@ -172,7 +201,72 @@ async function deleteR2(key: string): Promise<void> {
   );
 }
 
+// ─── Presigned URLs ───────────────────────────────────────────────────────────
+
+/**
+ * Generate a presigned download URL that expires after the given time.
+ * Presigned URLs allow direct client-to-R2 downloads without proxying
+ * through the Astro server, reducing bandwidth costs and latency.
+ *
+ * For local mode, it returns the direct local URL (no expiration).
+ */
+export async function getDownloadUrl(
+  key: string,
+  fileName: string,
+  mimeType: string,
+  directory: string,
+  expiresInSeconds: number = 3600,
+): Promise<string> {
+  const config = getConfig();
+
+  if (config.mode !== "r2") {
+    // Local mode: return direct URL (validated by session in download route)
+    return `${config.localBaseUrl}/${key}`;
+  }
+
+  const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+  const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
+  const client = await getS3Client();
+
+  const command = new GetObjectCommand({
+    Bucket: config.r2Bucket,
+    Key: key,
+    ResponseContentDisposition: getContentDisposition(directory, fileName),
+    ResponseContentType: mimeType,
+  });
+
+  return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+}
+
+/**
+ * Stream a file from storage to the response.
+ * Used for local mode downloads with proper headers and Range support.
+ * For R2 mode, prefer using presigned URLs instead.
+ */
+export async function getFileStream(key: string): Promise<{
+  stream: fs.ReadStream;
+  size: number;
+} | null> {
+  const config = getConfig();
+
+  if (config.mode !== "local") {
+    return null; // R2 mode uses presigned URLs
+  }
+
+  const fullPath = path.join(config.localPath, key);
+  try {
+    await fs.promises.access(fullPath, fs.constants.R_OK);
+    const stat = await fs.promises.stat(fullPath);
+    const stream = fs.createReadStream(fullPath);
+    return { stream, size: stat.size };
+  } catch {
+    return null;
+  }
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
+
+export { getCacheControl, getContentDisposition };
 
 export const storage = {
   async upload(options: UploadOptions): Promise<StorageFile> {
