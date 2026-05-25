@@ -8,6 +8,10 @@ import { storage } from "../lib/storage";
 import { getAuth } from "../lib/auth";
 import { processThumbnail, generateBlurPlaceholder, isValidImageBuffer } from "../lib/image";
 import { checkQuota, addStorageUsage, removeStorageUsage, getStorageQuota } from "../lib/quota";
+import { desc } from "drizzle-orm";
+
+import { blogPostsTable, type BlogPost } from "../db/blog-schema";
+import { ensureBlogTable } from "../db/blog";
 import type { Todo, TaskAttachment } from "../scripts/todo";
 import type { ActionAPIContext } from "astro:actions";
 
@@ -550,6 +554,173 @@ export const server = {
     handler: async (_input, context) => {
       const userId = await requireAuth(context);
       return getStorageQuota(userId);
+    },
+  }),
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ─── Blog Actions ─────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** Get all published blog posts (public) */
+  getPublishedBlogPosts: defineAction({
+    input: z.void(),
+    handler: async () => {
+      await ensureBlogTable();
+      const posts = await getDb()
+        .select()
+        .from(blogPostsTable)
+        .where(eq(blogPostsTable.published, true))
+        .orderBy(desc(blogPostsTable.publishedAt));
+      return posts as BlogPost[];
+    },
+  }),
+
+  /** Get a single blog post by slug (public) */
+  getBlogPostBySlug: defineAction({
+    input: z.object({ slug: z.string() }),
+    handler: async ({ slug }) => {
+      await ensureBlogTable();
+      const [post] = await getDb()
+        .select()
+        .from(blogPostsTable)
+        .where(eq(blogPostsTable.slug, slug));
+      return (post ?? null) as BlogPost | null;
+    },
+  }),
+
+  /** Get all blog posts including drafts (authenticated) */
+  getAllBlogPosts: defineAction({
+    input: z.void(),
+    handler: async (_input, context) => {
+      await requireAuth(context);
+      await ensureBlogTable();
+      const posts = await getDb()
+        .select()
+        .from(blogPostsTable)
+        .orderBy(desc(blogPostsTable.createdAt));
+      return posts as BlogPost[];
+    },
+  }),
+
+  /** Create a new blog post (authenticated) */
+  createBlogPost: defineAction({
+    input: z.object({
+      title: z.string().min(1).max(200),
+      slug: z.string().min(1).max(200),
+      content: z.string().min(1),
+      excerpt: z.string().max(500).optional(),
+      coverImage: z.string().optional(),
+      tags: z.string().optional(),
+      published: z.boolean().default(false),
+    }),
+    handler: async (input, context) => {
+      const userId = await requireAuth(context);
+      await ensureBlogTable();
+
+      // Check slug uniqueness
+      const [existing] = await getDb()
+        .select({ id: blogPostsTable.id })
+        .from(blogPostsTable)
+        .where(eq(blogPostsTable.slug, input.slug));
+      if (existing) {
+        throw new Error("Slug sudah digunakan. Gunakan slug yang berbeda.");
+      }
+
+      const now = Date.now();
+      const post = {
+        id: crypto.randomUUID(),
+        title: input.title.trim(),
+        slug: input.slug.trim(),
+        content: input.content,
+        excerpt: input.excerpt || null,
+        coverImage: input.coverImage || null,
+        tags: input.tags || null,
+        published: input.published,
+        authorId: userId,
+        createdAt: now,
+        updatedAt: now,
+        publishedAt: input.published ? now : null,
+      };
+
+      await getDb().insert(blogPostsTable).values(post);
+      return post as BlogPost;
+    },
+  }),
+
+  /** Update an existing blog post (authenticated) */
+  updateBlogPost: defineAction({
+    input: z.object({
+      id: z.string(),
+      title: z.string().min(1).max(200).optional(),
+      slug: z.string().min(1).max(200).optional(),
+      content: z.string().min(1).optional(),
+      excerpt: z.string().max(500).nullable().optional(),
+      coverImage: z.string().nullable().optional(),
+      tags: z.string().nullable().optional(),
+      published: z.boolean().optional(),
+    }),
+    handler: async (input, context) => {
+      await requireAuth(context);
+      await ensureBlogTable();
+
+      const { id, ...updates } = input;
+
+      // If publishing now and not previously published, set publishedAt
+      const { published, slug: newSlug, title: newTitle, content: newContent, excerpt: newExcerpt, coverImage: newCoverImage, tags: newTags } = updates;
+      const updatedFields: Record<string, string | number | boolean | null> = {
+        ...(newTitle !== undefined && { title: newTitle }),
+        ...(newSlug !== undefined && { slug: newSlug }),
+        ...(newContent !== undefined && { content: newContent }),
+        ...(newExcerpt !== undefined && { excerpt: newExcerpt }),
+        ...(newCoverImage !== undefined && { coverImage: newCoverImage }),
+        ...(newTags !== undefined && { tags: newTags }),
+        ...(published !== undefined && { published }),
+        updatedAt: Date.now(),
+      };
+
+      if (published === true) {
+        const [existing] = await getDb()
+          .select({ publishedAt: blogPostsTable.publishedAt })
+          .from(blogPostsTable)
+          .where(eq(blogPostsTable.id, id));
+
+        if (existing && !existing.publishedAt) {
+          updatedFields.publishedAt = Date.now();
+        }
+      }
+
+      // Check slug uniqueness if slug is being changed
+      if (updates.slug) {
+        const [existing] = await getDb()
+          .select({ id: blogPostsTable.id })
+          .from(blogPostsTable)
+          .where(eq(blogPostsTable.slug, updates.slug));
+        if (existing && existing.id !== id) {
+          throw new Error("Slug sudah digunakan. Gunakan slug yang berbeda.");
+        }
+      }
+
+      await getDb()
+        .update(blogPostsTable)
+        .set(updatedFields)
+        .where(eq(blogPostsTable.id, id));
+
+      const [post] = await getDb()
+        .select()
+        .from(blogPostsTable)
+        .where(eq(blogPostsTable.id, id));
+      return (post ?? null) as BlogPost | null;
+    },
+  }),
+
+  /** Delete a blog post (authenticated) */
+  deleteBlogPost: defineAction({
+    input: z.object({ id: z.string() }),
+    handler: async ({ id }, context) => {
+      await requireAuth(context);
+      await ensureBlogTable();
+      await getDb().delete(blogPostsTable).where(eq(blogPostsTable.id, id));
+      return { success: true };
     },
   }),
 };

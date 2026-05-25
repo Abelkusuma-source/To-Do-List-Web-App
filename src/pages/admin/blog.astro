@@ -1,0 +1,465 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { Button } from "../../components/starwind/button";
+
+const session = {
+  user: Astro.locals.user,
+  session: Astro.locals.session,
+};
+
+// Redirect if not authenticated
+if (!session.user) {
+  return Astro.redirect("/login");
+}
+---
+
+<Layout title="Admin Blog — Catatan Tugas" description="Kelola blog Catatan Tugas">
+  <div class="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
+    <!-- Header -->
+    <div class="mb-6 flex items-center justify-between">
+      <div>
+        <div class="flex items-center gap-2">
+          <a href="/dashboard" class="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+            Dashboard
+          </a>
+        </div>
+        <h1 class="mt-2 text-2xl font-bold tracking-tight text-foreground">Kelola Blog</h1>
+        <p class="text-sm text-muted-foreground">Buat, edit, dan publikasikan artikel blog.</p>
+      </div>
+      <button
+        id="new-post-btn"
+        class="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-xs transition-all hover:bg-primary/90"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+        Artikel Baru
+      </button>
+    </div>
+
+    <!-- Posts List -->
+    <div id="posts-container" class="space-y-3">
+      <div class="flex items-center justify-center py-20">
+        <div class="flex flex-col items-center gap-2 text-center">
+          <svg class="animate-spin size-8 text-muted-foreground" viewBox="0 0 24 24" fill="none">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <p class="text-sm text-muted-foreground">Memuat artikel...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Editor Modal -->
+  <div
+    id="editor-modal"
+    class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm hidden items-start justify-center overflow-y-auto p-4 pt-8"
+  >
+    <div
+      class="bg-card text-card-foreground ring-border w-full max-w-3xl rounded-xl ring-1 shadow-2xl animate-slideIn my-auto"
+    >
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between border-b border-border px-6 py-4">
+        <h2 id="editor-title" class="text-lg font-semibold text-foreground">Artikel Baru</h2>
+        <button
+          type="button"
+          id="editor-close-btn"
+          class="flex items-center justify-center size-8 border-none bg-transparent rounded-md cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-200"
+          aria-label="Tutup"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Modal Form -->
+      <form id="editor-form" class="px-6 py-4 space-y-4">
+        <input type="hidden" id="edit-id" />
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label for="edit-title" class="block text-sm font-medium text-foreground mb-1">Judul</label>
+            <input
+              id="edit-title"
+              type="text"
+              required
+              autocomplete="off"
+              placeholder="Masukkan judul artikel..."
+              class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 placeholder:text-muted-foreground h-11 px-3 text-base"
+            />
+          </div>
+
+          <div>
+            <label for="edit-slug" class="block text-sm font-medium text-foreground mb-1">Slug</label>
+            <input
+              id="edit-slug"
+              type="text"
+              required
+              autocomplete="off"
+              placeholder="judul-artikel"
+              class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 placeholder:text-muted-foreground h-11 px-3 text-sm"
+            />
+          </div>
+
+          <div>
+            <label for="edit-tags" class="block text-sm font-medium text-foreground mb-1">Tags</label>
+            <input
+              id="edit-tags"
+              type="text"
+              autocomplete="off"
+              placeholder="produktivitas, tips"
+              class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 placeholder:text-muted-foreground h-11 px-3 text-sm"
+            />
+            <p class="mt-1 text-xs text-muted-foreground">Pisahkan dengan koma</p>
+          </div>
+        </div>
+
+        <div>
+          <label for="edit-excerpt" class="block text-sm font-medium text-foreground mb-1">Ringkasan</label>
+          <textarea
+            id="edit-excerpt"
+            rows="2"
+            placeholder="Ringkasan singkat artikel..."
+            class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 placeholder:text-muted-foreground px-3 py-2 text-sm resize-none"
+          ></textarea>
+        </div>
+
+        <div>
+          <label for="edit-cover" class="block text-sm font-medium text-foreground mb-1">URL Cover Image</label>
+          <input
+            id="edit-cover"
+            type="url"
+            autocomplete="off"
+            placeholder="https://example.com/image.jpg"
+            class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 placeholder:text-muted-foreground h-11 px-3 text-sm"
+          />
+        </div>
+
+        <div>
+          <label for="edit-content" class="block text-sm font-medium text-foreground mb-1">Konten (Markdown)</label>
+          <textarea
+            id="edit-content"
+            rows="14"
+            required
+            placeholder="Tulis konten artikel di sini... Gunakan ## untuk heading, ### untuk sub-heading, - untuk list..."
+            class="border-input dark:bg-input/30 text-foreground w-full rounded-md border bg-transparent shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 placeholder:text-muted-foreground px-3 py-2 text-sm resize-y font-mono leading-relaxed"
+          ></textarea>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <input
+            id="edit-published"
+            type="checkbox"
+            class="border-input text-primary rounded-md border shadow-xs focus-visible:border-outline focus-visible:ring-outline/50 transition-[color,box-shadow] focus-visible:ring-3 size-4"
+          />
+          <label for="edit-published" class="text-sm font-medium text-foreground">Publikasikan sekarang</label>
+        </div>
+      </form>
+
+      <!-- Modal Footer -->
+      <div class="flex items-center justify-end gap-2 border-t border-border px-6 py-4">
+        <button
+          type="button"
+          id="editor-cancel-btn"
+          class="inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-all outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 dark:border-input focus-visible:ring-outline/50 bg-background dark:bg-input/30 focus-visible:border-outline hover:bg-muted dark:hover:bg-input/50 hover:text-foreground border shadow-xs h-9 px-4 text-sm"
+        >
+          Batal
+        </button>
+        <button
+          type="button"
+          id="editor-save-btn"
+          class="inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-all outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-primary/50 h-9 px-4 text-sm"
+        >
+          Simpan
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    import { actions } from "astro:actions";
+
+    // ─── State ───────────────────────────────────────────────────────────────
+    let posts = [];
+    let editingId = null;
+
+    // ─── DOM Refs ────────────────────────────────────────────────────────────
+    const container = document.getElementById("posts-container");
+    const modal = document.getElementById("editor-modal");
+    const editorTitle = document.getElementById("editor-title");
+    const form = document.getElementById("editor-form");
+    const idInput = document.getElementById("edit-id");
+    const titleInput = document.getElementById("edit-title");
+    const slugInput = document.getElementById("edit-slug");
+    const excerptInput = document.getElementById("edit-excerpt");
+    const contentInput = document.getElementById("edit-content");
+    const coverInput = document.getElementById("edit-cover");
+    const tagsInput = document.getElementById("edit-tags");
+    const publishedCheck = document.getElementById("edit-published");
+
+    // ─── Format Date ─────────────────────────────────────────────────────────
+    function formatDate(ts) {
+      if (!ts) return "-";
+      return new Date(ts).toLocaleDateString("id-ID", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+
+    // ─── Load Posts ──────────────────────────────────────────────────────────
+    async function loadPosts() {
+      try {
+        const result = await actions.getAllBlogPosts();
+        if (result?.data) {
+          posts = result.data;
+        } else {
+          posts = [];
+        }
+      } catch {
+        posts = [];
+      }
+      renderPosts();
+    }
+
+    // ─── Render Posts ────────────────────────────────────────────────────────
+    function renderPosts() {
+      if (posts.length === 0) {
+        container.innerHTML = `
+          <div class="flex flex-col items-center justify-center py-20 text-center">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="size-16 text-muted-foreground/30 mb-4">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+            </svg>
+            <h3 class="text-lg font-semibold text-foreground">Belum Ada Artikel</h3>
+            <p class="mt-1 text-sm text-muted-foreground">Klik "Artikel Baru" untuk membuat artikel pertama Anda.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = posts
+        .map(
+          (post) => `
+          <div class="group bg-card text-card-foreground ring-border flex items-start gap-4 rounded-xl ring-1 p-4 transition-all duration-200 hover:shadow-md">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                ${post.published
+                  ? `<span class="inline-flex items-center gap-1 rounded-full bg-success/20 px-2.5 py-0.5 text-[11px] font-medium text-success-foreground">
+                      <span class="size-1.5 rounded-full bg-current"></span>
+                      Publik
+                    </span>`
+                  : `<span class="inline-flex items-center gap-1 rounded-full bg-warning/20 px-2.5 py-0.5 text-[11px] font-medium text-warning-foreground">
+                      <span class="size-1.5 rounded-full bg-current"></span>
+                      Draft
+                    </span>`
+                }
+                <span class="text-xs text-muted-foreground">${formatDate(post.createdAt)}</span>
+              </div>
+              <h3 class="text-base font-semibold text-foreground truncate">${post.title}</h3>
+              ${post.excerpt
+                ? `<p class="text-sm text-muted-foreground truncate mt-0.5">${post.excerpt}</p>`
+                : ""
+              }
+              ${post.slug ? `<p class="text-xs text-muted-foreground/60 mt-0.5 font-mono">/${post.slug}</p>` : ""}
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <button
+                data-view="${post.slug}"
+                class="inline-flex items-center justify-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                onclick="window.open('/blog/${post.slug}', '_blank')"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
+                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                Lihat
+              </button>
+              <button
+                data-edit="${post.id}"
+                class="inline-flex items-center justify-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
+                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                </svg>
+                Edit
+              </button>
+              <button
+                data-delete="${post.id}"
+                class="inline-flex items-center justify-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-error/10 hover:text-error"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-3.5">
+                  <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                </svg>
+                Hapus
+              </button>
+            </div>
+          </div>
+        `
+        )
+        .join("");
+
+      // Bind edit buttons
+      container.querySelectorAll("[data-edit]").forEach((btn) => {
+        btn.addEventListener("click", () => openEditor(btn.getAttribute("data-edit")));
+      });
+
+      // Bind delete buttons
+      container.querySelectorAll("[data-delete]").forEach((btn) => {
+        btn.addEventListener("click", () => deletePost(btn.getAttribute("data-edit")));
+      });
+    }
+
+    // ─── Open Editor ─────────────────────────────────────────────────────────
+    function openEditor(postId = null) {
+      editingId = postId;
+      form.reset();
+      publishedCheck.checked = false;
+
+      if (postId) {
+        const post = posts.find((p) => p.id === postId);
+        if (!post) return;
+        editorTitle.textContent = "Edit Artikel";
+        idInput.value = post.id;
+        titleInput.value = post.title;
+        slugInput.value = post.slug;
+        excerptInput.value = post.excerpt || "";
+        contentInput.value = post.content;
+        coverInput.value = post.coverImage || "";
+        tagsInput.value = post.tags ? JSON.parse(post.tags).join(", ") : "";
+        publishedCheck.checked = post.published;
+      } else {
+        editorTitle.textContent = "Artikel Baru";
+        idInput.value = "";
+      }
+
+      modal.classList.remove("hidden");
+      modal.classList.add("flex");
+      titleInput.focus();
+    }
+
+    // ─── Close Editor ────────────────────────────────────────────────────────
+    function closeEditor() {
+      modal.classList.add("hidden");
+      modal.classList.remove("flex");
+      editingId = null;
+    }
+
+    // ─── Save Post ───────────────────────────────────────────────────────────
+    async function savePost() {
+      const title = titleInput.value.trim();
+      const slug = slugInput.value.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+      const excerpt = excerptInput.value.trim();
+      const content = contentInput.value.trim();
+      const coverImage = coverInput.value.trim() || null;
+      const tagsRaw = tagsInput.value.trim();
+      const published = publishedCheck.checked;
+
+      if (!title || !slug || !content) {
+        alert("Harap isi judul, slug, dan konten artikel.");
+        return;
+      }
+
+      // Convert tags to JSON array
+      const tags = tagsRaw
+        ? JSON.stringify(tagsRaw.split(",").map((t) => t.trim()).filter(Boolean))
+        : null;
+
+      const saveBtn = document.getElementById("editor-save-btn");
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = `
+        <svg class="animate-spin size-4" viewBox="0 0 24 24" fill="none">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+        Menyimpan...
+      `;
+
+      try {
+        if (editingId) {
+          await actions.updateBlogPost({
+            id: editingId,
+            title,
+            slug,
+            content,
+            excerpt: excerpt || null,
+            coverImage,
+            tags,
+            published,
+          });
+        } else {
+          await actions.createBlogPost({
+            title,
+            slug,
+            content,
+            excerpt: excerpt || null,
+            coverImage,
+            tags,
+            published,
+          });
+        }
+
+        closeEditor();
+        await loadPosts();
+      } catch (err) {
+        alert("Gagal menyimpan artikel: " + (err instanceof Error ? err.message : "Unknown error"));
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = "Simpan";
+      }
+    }
+
+    // ─── Delete Post ─────────────────────────────────────────────────────────
+    async function deletePost(postId) {
+      if (!confirm("Apakah Anda yakin ingin menghapus artikel ini?")) return;
+
+      try {
+        await actions.deleteBlogPost({ id: postId });
+        await loadPosts();
+      } catch (err) {
+        alert("Gagal menghapus artikel.");
+      }
+    }
+
+    // ─── Auto-generate slug from title ───────────────────────────────────────
+    titleInput.addEventListener("input", () => {
+      if (!editingId) {
+        slugInput.value = titleInput.value
+          .toLowerCase()
+          .replace(/\s+/g, "-")
+          .replace(/[^a-z0-9-]/g, "")
+          .replace(/-+/g, "-")
+          .replace(/^-|-$/g, "");
+      }
+    });
+
+    // ─── Event Bindings ──────────────────────────────────────────────────────
+    document.getElementById("new-post-btn").addEventListener("click", () => openEditor(null));
+    document.getElementById("editor-close-btn").addEventListener("click", closeEditor);
+    document.getElementById("editor-cancel-btn").addEventListener("click", closeEditor);
+    document.getElementById("editor-save-btn").addEventListener("click", savePost);
+
+    // Close modal on overlay click
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeEditor();
+    });
+
+    // Keyboard shortcut
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeEditor();
+    });
+
+    // ─── Init ────────────────────────────────────────────────────────────────
+    loadPosts();
+  </script>
+</Layout>

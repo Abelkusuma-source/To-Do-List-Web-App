@@ -1,0 +1,174 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../../components/starwind/card";
+import { Badge } from "../../components/starwind/badge";
+import { ensureBlogTable } from "../../db/blog";
+import { getDb } from "../../db";
+import { blogPostsTable } from "../../db/blog-schema";
+import { eq, desc } from "drizzle-orm";
+import { user } from "../../db/schema";
+
+// Ensure the blog table exists (first request might create it)
+await ensureBlogTable();
+
+// Fetch published posts with author info
+const posts = await getDb()
+  .select({
+    id: blogPostsTable.id,
+    title: blogPostsTable.title,
+    slug: blogPostsTable.slug,
+    excerpt: blogPostsTable.excerpt,
+    coverImage: blogPostsTable.coverImage,
+    tags: blogPostsTable.tags,
+    publishedAt: blogPostsTable.publishedAt,
+    createdAt: blogPostsTable.createdAt,
+    authorName: user.name,
+    authorImage: user.image,
+  })
+  .from(blogPostsTable)
+  .where(eq(blogPostsTable.published, true))
+  .innerJoin(user, eq(blogPostsTable.authorId, user.id))
+  .orderBy(desc(blogPostsTable.publishedAt));
+---
+
+<Layout title="Blog — Catatan Tugas" description="Blog Catatan Tugas — Tips, trik, dan pembaruan seputar aplikasi catatan tugas.">
+  <!-- Navigation -->
+  <nav class="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-lg">
+    <div class="mx-auto flex max-w-4xl items-center justify-between px-4 py-3 sm:px-6">
+      <a href="/" class="flex items-center gap-2.5">
+        <div class="flex size-8 items-center justify-center rounded-lg bg-primary shadow-xs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4 text-primary-foreground">
+            <path d="M9 11l3 3L22 4" />
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+          </svg>
+        </div>
+        <span class="text-base font-bold tracking-tight text-foreground">Catatan Tugas</span>
+      </a>
+      <a href="/" class="text-sm text-muted-foreground transition-colors hover:text-foreground">
+        <span class="flex items-center gap-1">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4">
+            <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
+          </svg>
+          Beranda
+        </span>
+      </a>
+    </div>
+  </nav>
+
+  <!-- Blog Header -->
+  <div class="border-b border-border bg-muted/30">
+    <div class="mx-auto max-w-4xl px-4 py-16 text-center sm:px-6 sm:py-24">
+      <span class="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3.5 py-1 text-xs font-medium text-primary">BLOG</span>
+      <h1 class="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+        Catatan & Artikel
+      </h1>
+      <p class="mt-3 text-base text-muted-foreground">
+        Tips, trik, dan pembaruan seputar aplikasi Catatan Tugas.
+      </p>
+    </div>
+  </div>
+
+  <!-- Blog Posts Grid -->
+  <div class="mx-auto max-w-4xl px-4 py-12 sm:px-6 sm:py-16">
+    {posts.length > 0 ? (
+      <div class="grid gap-6 sm:grid-cols-2">
+        {posts.map((post) => (
+          <a href={`/blog/${post.slug}`} class="group block transition-all duration-200">
+            <Card size="sm" class="h-full overflow-hidden transition-all duration-200 group-hover:shadow-lg group-hover:-translate-y-0.5">
+              <!-- Cover Image -->
+              {post.coverImage ? (
+                <div class="aspect-[16/9] overflow-hidden bg-muted">
+                  <img
+                    src={post.coverImage}
+                    alt={post.title}
+                    class="size-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    loading="lazy"
+                  />
+                </div>
+              ) : (
+                <div class="flex aspect-[16/9] items-center justify-center bg-gradient-to-br from-primary/5 to-secondary/5">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="size-12 text-muted-foreground/30">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                  </svg>
+                </div>
+              )}
+
+              <CardHeader>
+                <!-- Tags -->
+                {post.tags ? (
+                  <div class="mb-2 flex flex-wrap gap-1.5">
+                    {(JSON.parse(post.tags) as string[]).slice(0, 3).map((tag: string) => (
+                      <Badge variant="outline" size="sm">{tag}</Badge>
+                    ))}
+                  </div>
+                ) : null}
+
+                <CardTitle class="line-clamp-2 group-hover:text-primary transition-colors">
+                  {post.title}
+                </CardTitle>
+
+                {post.excerpt ? (
+                  <CardDescription class="line-clamp-2 text-sm">
+                    {post.excerpt}
+                  </CardDescription>
+                ) : null}
+
+                <!-- Meta -->
+                <div class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  {post.authorImage ? (
+                    <img src={post.authorImage} alt="" class="size-5 rounded-full" />
+                  ) : (
+                    <div class="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-medium text-primary">
+                      {(post.authorName ?? "U").charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <span>{post.authorName}</span>
+                  <span class="text-border">·</span>
+                  <span>{post.publishedAt ? new Date(post.publishedAt).toLocaleDateString("id-ID", { year: "numeric", month: "long", day: "numeric" }) : ""}</span>
+                </div>
+              </CardHeader>
+            </Card>
+          </a>
+        ))}
+      </div>
+    ) : (
+      <div class="flex flex-col items-center justify-center py-20 text-center">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="size-16 text-muted-foreground/30 mb-4">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+        </svg>
+        <h3 class="text-lg font-semibold text-foreground">Belum Ada Artikel</h3>
+        <p class="mt-1 text-sm text-muted-foreground">
+          Artikel blog akan muncul di sini setelah diterbitkan.
+        </p>
+        <a
+          href="/login"
+          class="mt-6 inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90"
+        >
+          Mulai Menulis
+        </a>
+      </div>
+    )}
+  </div>
+
+  <!-- Footer -->
+  <footer class="border-t border-border bg-muted/30">
+    <div class="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+      <div class="flex flex-col items-center justify-between gap-4 sm:flex-row">
+        <p class="text-xs text-muted-foreground">
+          &copy; {new Date().getFullYear()} Catatan Tugas
+        </p>
+        <div class="flex items-center gap-4">
+          <a href="/" class="text-xs text-muted-foreground transition-colors hover:text-foreground">Beranda</a>
+          <a href="/login" class="text-xs text-muted-foreground transition-colors hover:text-foreground">Masuk</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+</Layout>

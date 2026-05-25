@@ -1,0 +1,185 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { Badge } from "../../components/starwind/badge";
+import { ensureBlogTable } from "../../db/blog";
+import { getDb } from "../../db";
+import { blogPostsTable } from "../../db/blog-schema";
+import { eq } from "drizzle-orm";
+import { user } from "../../db/schema";
+
+export async function getStaticPaths() {
+  // For SSR, this runs on each request; we'll fetch dynamically
+  return [];
+}
+
+// Get slug from the URL params
+const { slug } = Astro.params;
+
+if (!slug) {
+  return Astro.redirect("/blog");
+}
+
+await ensureBlogTable();
+
+// Fetch the post with author info
+const [post] = await getDb()
+  .select({
+    id: blogPostsTable.id,
+    title: blogPostsTable.title,
+    slug: blogPostsTable.slug,
+    content: blogPostsTable.content,
+    excerpt: blogPostsTable.excerpt,
+    coverImage: blogPostsTable.coverImage,
+    tags: blogPostsTable.tags,
+    published: blogPostsTable.published,
+    publishedAt: blogPostsTable.publishedAt,
+    createdAt: blogPostsTable.createdAt,
+    updatedAt: blogPostsTable.updatedAt,
+    authorName: user.name,
+    authorImage: user.image,
+  })
+  .from(blogPostsTable)
+  .where(eq(blogPostsTable.slug, slug))
+  .innerJoin(user, eq(blogPostsTable.authorId, user.id))
+  .limit(1);
+
+if (!post || !post.published) {
+  return Astro.redirect("/blog");
+}
+
+const parsedTags: string[] = post.tags ? (JSON.parse(post.tags) as string[]) : [];
+
+// Format dates
+const publishedDate = post.publishedAt
+  ? new Date(post.publishedAt).toLocaleDateString("id-ID", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    })
+  : "";
+const updatedDate = new Date(post.updatedAt).toLocaleDateString("id-ID", {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+});
+
+// Estimate reading time (approx 200 words per minute)
+const wordCount = post.content.split(/\s+/).length;
+const readingTime = Math.max(1, Math.ceil(wordCount / 200));
+---
+
+<Layout title={`${post.title} — Blog Catatan Tugas`} description={post.excerpt ?? post.title}>
+  <!-- Navigation -->
+  <nav class="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-lg">
+    <div class="mx-auto flex max-w-3xl items-center justify-between px-4 py-3 sm:px-6">
+      <a href="/" class="flex items-center gap-2.5">
+        <div class="flex size-8 items-center justify-center rounded-lg bg-primary shadow-xs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4 text-primary-foreground">
+            <path d="M9 11l3 3L22 4" />
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+          </svg>
+        </div>
+        <span class="text-base font-bold tracking-tight text-foreground">Catatan Tugas</span>
+      </a>
+      <div class="flex items-center gap-3">
+        <a href="/blog" class="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-4">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+          Kembali
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <article class="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-16">
+    <!-- Cover Image -->
+    {post.coverImage ? (
+      <div class="mb-8 overflow-hidden rounded-xl bg-muted">
+        <img
+          src={post.coverImage}
+          alt={post.title}
+          class="aspect-[21/9] w-full object-cover"
+        />
+      </div>
+    ) : null}
+
+    <!-- Meta Info -->
+    <div class="mb-6">
+      {parsedTags.length > 0 ? (
+        <div class="mb-3 flex flex-wrap gap-1.5">
+          {parsedTags.map((tag: string) => (
+            <Badge variant="outline" size="sm">{tag}</Badge>
+          ))}
+        </div>
+      ) : null}
+
+      <h1 class="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+        {post.title}
+      </h1>
+
+      <div class="mt-4 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+        <div class="flex items-center gap-2">
+          {post.authorImage ? (
+            <img src={post.authorImage} alt="" class="size-7 rounded-full" />
+          ) : (
+            <div class="flex size-7 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
+              {(post.authorName ?? "U").charAt(0).toUpperCase()}
+            </div>
+          )}
+          <span class="font-medium text-foreground">{post.authorName}</span>
+        </div>
+        <span class="text-border">·</span>
+        <time datetime={post.publishedAt ? new Date(post.publishedAt).toISOString() : ""}>
+          {publishedDate}
+        </time>
+        <span class="text-border">·</span>
+        <span>{readingTime} menit membaca</span>
+      </div>
+
+      {post.updatedAt !== post.createdAt ? (
+        <p class="mt-2 text-xs text-muted-foreground">
+          Terakhir diperbarui {updatedDate}
+        </p>
+      ) : null}
+    </div>
+
+    <!-- Content -->
+    <div class="prose prose-neutral dark:prose-invert max-w-none">
+      {post.content.split("\n").map((paragraph, i) => {
+        // Simple markdown-to-HTML conversion for basic formatting
+        if (paragraph.startsWith("## ")) {
+          return <h2 class="mt-10 mb-4 text-2xl font-bold text-foreground">{paragraph.slice(3)}</h2>;
+        }
+        if (paragraph.startsWith("### ")) {
+          return <h3 class="mt-8 mb-3 text-xl font-semibold text-foreground">{paragraph.slice(4)}</h3>;
+        }
+        if (paragraph.startsWith("- ")) {
+          return <li class="ml-6 list-disc text-base leading-relaxed text-muted-foreground">{paragraph.slice(2)}</li>;
+        }
+        if (paragraph.trim() === "") {
+          return <div class="h-4"></div>;
+        }
+        return (
+          <p class="mb-4 text-base leading-relaxed text-muted-foreground last:mb-0">
+            {paragraph}
+          </p>
+        );
+      })}
+    </div>
+  </article>
+
+  <!-- Footer -->
+  <footer class="border-t border-border bg-muted/30">
+    <div class="mx-auto flex max-w-3xl flex-col items-center justify-between gap-4 px-4 py-8 sm:flex-row sm:px-6">
+      <p class="text-xs text-muted-foreground">
+        &copy; {new Date().getFullYear()} Catatan Tugas
+      </p>
+      <div class="flex items-center gap-4">
+        <a href="/" class="text-xs text-muted-foreground transition-colors hover:text-foreground">Beranda</a>
+        <a href="/blog" class="text-xs text-muted-foreground transition-colors hover:text-foreground">Blog</a>
+        <a href="/login" class="text-xs text-muted-foreground transition-colors hover:text-foreground">Masuk</a>
+      </div>
+    </div>
+  </footer>
+</Layout>

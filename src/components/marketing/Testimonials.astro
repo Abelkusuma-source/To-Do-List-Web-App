@@ -1,0 +1,76 @@
+---
+import { Card, CardHeader, CardContent } from "../starwind/card";
+
+const testimonials = [
+  {
+    quote: "Aplikasi ini sangat membantu saya mengelola tugas sehari-hari. Fitur thumbnail dan lampiran file bikin workflow saya jauh lebih rapi.",
+    name: "Ahmad Fauzi",
+    role: "Mahasiswa",
+    initials: "AF",
+  },
+  {
+    quote: "Google Auth bikin login super cepat. Nggak perlu repot bikin akun baru. Interface-nya juga bersih dan modern.",
+    name: "Siti Rahma",
+    role: "Freelancer",
+    initials: "SR",
+  },
+  {
+    quote: "Fitur prioritas dan deadline bantu saya nggak pernah telat ngumpulin tugas. Cloud storage-nya juga gratis, puas banget!",
+    name: "Bambang Setiawan",
+    role: "Karyawan Swasta",
+    initials: "BS",
+  },
+];
+---
+
+<section class="border-t border-border bg-muted/30 py-20 sm:py-28">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6">
+    <div class="mx-auto max-w-2xl text-center">
+      <span class="inline-flex items-center gap-1.5 rounded-full bg-secondary/10 px-3.5 py-1 text-xs font-medium text-secondary">
+        TESTIMONIAL
+      </span>
+      <h2 class="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+        Apa Kata Pengguna
+      </h2>
+      <p class="mt-3 text-balance text-base text-muted-foreground">
+        Lihat apa yang pengguna lain katakan tentang aplikasi Catatan Tugas.
+      </p>
+    </div>
+
+    <div class="mt-12 grid gap-6 md:grid-cols-3">
+      {testimonials.map((t) => (
+        <Card size="sm" class="relative">
+          <CardHeader>
+            <!-- Quote Icon -->
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="size-8 text-muted-foreground/20 mb-1"
+            >
+              <path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z" />
+              <path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z" />
+            </svg>
+            <blockquote class="text-sm text-muted-foreground leading-relaxed">
+              "{t.quote}"
+            </blockquote>
+          </CardHeader>
+          <CardContent>
+            <div class="flex items-center gap-3 pt-2 border-t border-border">
+              <div class="flex size-9 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                {t.initials}
+              </div>
+              <div>
+                <p class="text-sm font-medium text-foreground">{t.name}</p>
+                <p class="text-xs text-muted-foreground">{t.role}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  </div>
+</section>
