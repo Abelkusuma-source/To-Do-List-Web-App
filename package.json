@@ -14,8 +14,8 @@
     "push": "drizzle-kit push",
     "push:prod": "npx dotenv -e .env.production -- drizzle-kit push",
     "generate": "drizzle-kit generate",
-    "deploy": "npx wrangler pages deploy dist --project-name todo-app",
-    "deploy:prod": "npx wrangler pages deploy dist --project-name todo-app --branch production"
+    "deploy": "npx wrangler deploy --config dist/server/wrangler.json",
+    "deploy:prod": "npx wrangler deploy --config dist/server/wrangler.json"
   },
   "optionalDependencies": {
     "sharp": "^0.34.5"
@@ -38,6 +38,7 @@
     "@tailwindcss/forms": "^0.5.11",
     "@tailwindcss/vite": "^4.3.0",
     "astro": "^6.3.7",
+    "aws4fetch": "^1.0.20",
     "better-auth": "^1.6.11",
     "drizzle-orm": "^0.45.2",
     "tailwind-merge": "^3.6.0",

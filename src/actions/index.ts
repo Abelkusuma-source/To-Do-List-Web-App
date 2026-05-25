@@ -2,10 +2,10 @@ import { defineAction } from "astro:actions";
 import { z } from "astro:schema";
 import { eq, and } from "drizzle-orm";
 
-import { db } from "../db";
+import { getDb } from "../db";
 import { todosTable, taskAttachmentsTable } from "../db/schema";
 import { storage } from "../lib/storage";
-import { auth } from "../lib/auth";
+import { getAuth } from "../lib/auth";
 import { processThumbnail, generateBlurPlaceholder, isValidImageBuffer } from "../lib/image";
 import { checkQuota, addStorageUsage, removeStorageUsage, getStorageQuota } from "../lib/quota";
 import type { Todo, TaskAttachment } from "../scripts/todo";
@@ -14,6 +14,7 @@ import type { ActionAPIContext } from "astro:actions";
 // ─── Helper: Get authenticated user ─────────────────────────────────────────
 
 async function requireAuth(context: ActionAPIContext): Promise<string> {
+  const auth = getAuth();
   const session = await auth.api.getSession({
     headers: context.request.headers,
   });
@@ -55,7 +56,7 @@ export const server = {
     input: z.void(),
     handler: async (_input, context) => {
       const userId = await requireAuth(context);
-      const todos = await db
+      const todos = await getDb()
         .select()
         .from(todosTable)
         .where(eq(todosTable.userId, userId))
@@ -88,7 +89,7 @@ export const server = {
         createdAt: now,
         updatedAt: now,
       };
-      await db.insert(todosTable).values(todo);
+      await getDb().insert(todosTable).values(todo);
       return todo as Todo;
     },
   }),
@@ -109,12 +110,12 @@ export const server = {
       const { id, ...updates } = input;
 
       // Only update if the todo belongs to this user
-      await db
+      await getDb()
         .update(todosTable)
         .set({ ...updates, updatedAt: Date.now() })
         .where(and(eq(todosTable.id, id), eq(todosTable.userId, userId)));
 
-      const [todo] = await db
+      const [todo] = await getDb()
         .select()
         .from(todosTable)
         .where(eq(todosTable.id, id));
@@ -128,7 +129,7 @@ export const server = {
       const userId = await requireAuth(context);
 
       // Get todo to verify ownership and clean up thumbnail
-      const [todo] = await db
+      const [todo] = await getDb()
         .select()
         .from(todosTable)
         .where(and(eq(todosTable.id, id), eq(todosTable.userId, userId)));
@@ -146,7 +147,7 @@ export const server = {
       }
 
       // Clean up attachments from storage & track freed space
-      const attachments = await db
+      const attachments = await getDb()
         .select()
         .from(taskAttachmentsTable)
         .where(eq(taskAttachmentsTable.taskId, id));
@@ -166,7 +167,7 @@ export const server = {
       }
 
       // Delete todo (cascade deletes attachments from DB)
-      await db.delete(todosTable).where(eq(todosTable.id, id));
+      await getDb().delete(todosTable).where(eq(todosTable.id, id));
       return { success: true };
     },
   }),
@@ -177,7 +178,7 @@ export const server = {
       const userId = await requireAuth(context);
 
       // Get completed todos for this user
-      const completedTodos = await db
+      const completedTodos = await getDb()
         .select()
         .from(todosTable)
         .where(and(eq(todosTable.done, true), eq(todosTable.userId, userId)));
@@ -197,7 +198,7 @@ export const server = {
 
       // Clean up attachment files
       for (const todo of completedTodos) {
-        const attachments = await db
+        const attachments = await getDb()
           .select()
           .from(taskAttachmentsTable)
           .where(eq(taskAttachmentsTable.taskId, todo.id));
@@ -218,7 +219,7 @@ export const server = {
       }
 
       // Delete completed todos (cascade deletes attachments from DB)
-      await db.delete(todosTable).where(and(eq(todosTable.done, true), eq(todosTable.userId, userId)));
+      await getDb().delete(todosTable).where(and(eq(todosTable.done, true), eq(todosTable.userId, userId)));
       return { success: true };
     },
   }),
@@ -257,7 +258,7 @@ export const server = {
       await checkQuota(userId, input.file.size);
 
       // Get existing thumbnail to delete it (verify ownership)
-      const [todo] = await db
+      const [todo] = await getDb()
         .select()
         .from(todosTable)
         .where(and(eq(todosTable.id, input.taskId), eq(todosTable.userId, userId)));
@@ -305,7 +306,7 @@ export const server = {
         placeholder = await generateBlurPlaceholder(processed.buffer);
       }
 
-      await db
+      await getDb()
         .update(todosTable)
         .set({
           thumbnailUrl: uploaded.url,
@@ -327,7 +328,7 @@ export const server = {
     handler: async (input, context) => {
       const userId = await requireAuth(context);
 
-      const [todo] = await db
+      const [todo] = await getDb()
         .select()
         .from(todosTable)
         .where(and(eq(todosTable.id, input.taskId), eq(todosTable.userId, userId)));
@@ -340,7 +341,7 @@ export const server = {
         // ignore
       }
 
-      await db
+      await getDb()
         .update(todosTable)
         .set({ thumbnailUrl: null, updatedAt: Date.now() })
         .where(eq(todosTable.id, input.taskId));
@@ -361,7 +362,7 @@ export const server = {
       const userId = await requireAuth(context);
 
       // Verify todo ownership
-      const [todo] = await db
+      const [todo] = await getDb()
         .select({ id: todosTable.id })
         .from(todosTable)
         .where(and(eq(todosTable.id, input.taskId), eq(todosTable.userId, userId)));
@@ -437,7 +438,7 @@ export const server = {
         updatedAt: now,
       };
 
-      await db.insert(taskAttachmentsTable).values(attachment);
+      await getDb().insert(taskAttachmentsTable).values(attachment);
 
       return attachment as TaskAttachment;
     },
@@ -449,7 +450,7 @@ export const server = {
       const userId = await requireAuth(context);
 
       // Verify todo ownership
-      const [todo] = await db
+      const [todo] = await getDb()
         .select({ id: todosTable.id })
         .from(todosTable)
         .where(and(eq(todosTable.id, input.taskId), eq(todosTable.userId, userId)));
@@ -458,7 +459,7 @@ export const server = {
         throw new Error("Tugas tidak ditemukan.");
       }
 
-      const attachments = await db
+      const attachments = await getDb()
         .select()
         .from(taskAttachmentsTable)
         .where(eq(taskAttachmentsTable.taskId, input.taskId))
@@ -473,7 +474,7 @@ export const server = {
     handler: async (input, context) => {
       const userId = await requireAuth(context);
 
-      const [attachment] = await db
+      const [attachment] = await getDb()
         .select({
           id: taskAttachmentsTable.id,
           taskId: taskAttachmentsTable.taskId,
@@ -488,7 +489,7 @@ export const server = {
       }
 
       // Verify todo ownership
-      const [todo] = await db
+      const [todo] = await getDb()
         .select({ id: todosTable.id })
         .from(todosTable)
         .where(and(eq(todosTable.id, attachment.taskId), eq(todosTable.userId, userId)));
@@ -503,7 +504,7 @@ export const server = {
         // ignore
       }
 
-      await db
+      await getDb()
         .delete(taskAttachmentsTable)
         .where(eq(taskAttachmentsTable.id, input.attachmentId));
 
@@ -519,7 +520,7 @@ export const server = {
     handler: async (input, context) => {
       const userId = await requireAuth(context);
 
-      const [attachment] = await db
+      const [attachment] = await getDb()
         .select()
         .from(taskAttachmentsTable)
         .where(eq(taskAttachmentsTable.id, input.attachmentId));
@@ -529,7 +530,7 @@ export const server = {
       }
 
       // Verify todo ownership
-      const [todo] = await db
+      const [todo] = await getDb()
         .select({ id: todosTable.id })
         .from(todosTable)
         .where(and(eq(todosTable.id, attachment.taskId), eq(todosTable.userId, userId)));

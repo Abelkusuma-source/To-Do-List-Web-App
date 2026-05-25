@@ -1,5 +1,10 @@
 import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client/web";
+import { getEnv } from "../lib/env";
+
+export type Db = ReturnType<typeof drizzle>;
+
+let _db: Db | null = null;
 
 /**
  * Creates a libSQL/Turso client compatible with Cloudflare Workers.
@@ -9,13 +14,11 @@ import { createClient } from "@libsql/client/web";
  *   instead of Node.js net/tls — works in both Node.js and Workers.
  * - Converts `libsql:` URL scheme to `https:` explicitly to avoid any
  *   scheme-resolution edge cases in the Workers runtime.
- * - Passes `globalThis.fetch` explicitly so the client uses the platform's
- *   native fetch (required for Workers HTTP streaming to work correctly).
  * - Limits concurrency to a safe value for edge function environments.
  */
 function createTursoClient() {
-  const rawUrl = import.meta.env.TURSO_CONNECTION_URL;
-  const authToken = import.meta.env.TURSO_AUTH_TOKEN;
+  const rawUrl = getEnv("TURSO_CONNECTION_URL");
+  const authToken = getEnv("TURSO_AUTH_TOKEN");
 
   if (!rawUrl) {
     throw new Error(
@@ -29,8 +32,6 @@ function createTursoClient() {
   }
 
   // Convert libsql:// -> https:// for explicit HTTP transport on Workers.
-  // The /web entry point handles this internally via expandConfig(), but
-  // passing https:// directly avoids any conditional-scheme edge cases.
   // Only transform if the scheme is libsql: — leave https: URLs as-is.
   const httpsUrl = rawUrl.startsWith("libsql:")
     ? rawUrl.replace(/^libsql:/, "https:")
@@ -43,6 +44,17 @@ function createTursoClient() {
   });
 }
 
-const client = createTursoClient();
-
-export const db = drizzle(client);
+/**
+ * Get the Drizzle ORM database instance (lazy singleton).
+ *
+ * On Cloudflare Workers, env vars are not available at module load time.
+ * This function initialises the DB client on first call, by which time
+ * the middleware has populated the env store from the Workers runtime.
+ */
+export function getDb(): Db {
+  if (!_db) {
+    const client = createTursoClient();
+    _db = drizzle(client);
+  }
+  return _db;
+}

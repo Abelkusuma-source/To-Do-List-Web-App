@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { getDb } from "../db";
 import { storageUsageTable } from "../db/schema";
 import { eq } from "drizzle-orm";
 
@@ -18,7 +18,7 @@ export interface StorageQuota {
  * Creates a usage record if one doesn't exist yet.
  */
 export async function getStorageQuota(userId: string): Promise<StorageQuota> {
-  let usage = await db
+  let usage = await getDb()
     .select()
     .from(storageUsageTable)
     .where(eq(storageUsageTable.userId, userId))
@@ -34,7 +34,7 @@ export async function getStorageQuota(userId: string): Promise<StorageQuota> {
       quotaBytes: 100 * 1024 * 1024, // 100MB default
       updatedAt: now,
     };
-    await db.insert(storageUsageTable).values(usage);
+    await getDb().insert(storageUsageTable).values(usage);
   }
 
   return {
@@ -56,14 +56,14 @@ export async function addStorageUsage(
   isNewFile: boolean = true,
 ): Promise<void> {
   const now = Date.now();
-  const existing = await db
+  const existing = await getDb()
     .select()
     .from(storageUsageTable)
     .where(eq(storageUsageTable.userId, userId))
     .then((rows) => rows[0] ?? null);
 
   if (existing) {
-    await db
+    await getDb()
       .update(storageUsageTable)
       .set({
         totalBytes: existing.totalBytes + bytes,
@@ -72,7 +72,7 @@ export async function addStorageUsage(
       })
       .where(eq(storageUsageTable.userId, userId));
   } else {
-    await db.insert(storageUsageTable).values({
+    await getDb().insert(storageUsageTable).values({
       id: crypto.randomUUID(),
       userId,
       totalBytes: bytes,
@@ -91,14 +91,14 @@ export async function removeStorageUsage(
   bytes: number,
   removedFile: boolean = true,
 ): Promise<void> {
-  const existing = await db
+  const existing = await getDb()
     .select()
     .from(storageUsageTable)
     .where(eq(storageUsageTable.userId, userId))
     .then((rows) => rows[0] ?? null);
 
   if (existing) {
-    await db
+    await getDb()
       .update(storageUsageTable)
       .set({
         totalBytes: Math.max(0, existing.totalBytes - bytes),

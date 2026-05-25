@@ -1,4 +1,6 @@
 import path from "node:path";
+import { AwsClient } from "aws4fetch";
+import { getEnv } from "./env";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -54,19 +56,20 @@ interface StorageConfig {
 }
 
 function getConfig(): StorageConfig {
-  const mode = (import.meta.env.STORAGE_MODE as string) === "r2" ? "r2" : "local";
+  const modeStr = getEnv("STORAGE_MODE");
+  const mode = modeStr === "r2" ? "r2" : "local";
 
   return {
     mode,
-    localPath: import.meta.env.LOCAL_STORAGE_PATH || "./data/uploads",
-    localBaseUrl: import.meta.env.LOCAL_STORAGE_BASE_URL || "/uploads",
-    r2Endpoint: import.meta.env.R2_ENDPOINT,
-    r2Region: import.meta.env.R2_REGION || "auto",
-    r2Bucket: import.meta.env.R2_BUCKET,
-    r2AccessKeyId: import.meta.env.R2_ACCESS_KEY_ID,
-    r2SecretAccessKey: import.meta.env.R2_SECRET_ACCESS_KEY,
-    r2PublicUrl: import.meta.env.R2_PUBLIC_URL,
-    publicDomain: import.meta.env.PUBLIC_DOMAIN || import.meta.env.BETTER_AUTH_URL,
+    localPath: getEnv("LOCAL_STORAGE_PATH") || "./data/uploads",
+    localBaseUrl: getEnv("LOCAL_STORAGE_BASE_URL") || "/api/uploads",
+    r2Endpoint: getEnv("R2_ENDPOINT"),
+    r2Region: getEnv("R2_REGION") || "auto",
+    r2Bucket: getEnv("R2_BUCKET"),
+    r2AccessKeyId: getEnv("R2_ACCESS_KEY_ID"),
+    r2SecretAccessKey: getEnv("R2_SECRET_ACCESS_KEY"),
+    r2PublicUrl: getEnv("R2_PUBLIC_URL"),
+    publicDomain: getEnv("PUBLIC_DOMAIN") || getEnv("BETTER_AUTH_URL") || "",
   };
 }
 
@@ -148,75 +151,62 @@ function getContentDisposition(directory: string, fileName: string): string {
 
 // ─── R2/S3-Compatible Storage ────────────────────────────────────────────────
 
-let _s3Client: any = null;
+let _aws: AwsClient | null = null;
 
-async function getS3Client() {
-  if (_s3Client) return _s3Client;
-  const { S3Client } = await import("@aws-sdk/client-s3");
+function getAwsClient(): AwsClient {
+  if (_aws) return _aws;
   const config = getConfig();
-
-  _s3Client = new S3Client({
+  _aws = new AwsClient({
+    accessKeyId: config.r2AccessKeyId!,
+    secretAccessKey: config.r2SecretAccessKey!,
     region: config.r2Region,
-    endpoint: config.r2Endpoint,
-    credentials: {
-      accessKeyId: config.r2AccessKeyId!,
-      secretAccessKey: config.r2SecretAccessKey!,
-    },
-    forcePathStyle: true,
+    service: "s3",
   });
-
-  return _s3Client;
+  return _aws;
 }
 
 async function uploadR2(options: UploadOptions): Promise<StorageFile> {
+  const aws = getAwsClient();
   const config = getConfig();
-  const { PutObjectCommand } = await import("@aws-sdk/client-s3");
-  const client = await getS3Client();
 
   const id = crypto.randomUUID();
   const ext = path.extname(options.fileName);
   const safeName = `${id}${ext}`;
   const key = `${options.directory}/${safeName}`;
 
-  await client.send(
-    new PutObjectCommand({
-      Bucket: config.r2Bucket,
-      Key: key,
-      Body: Buffer.from(options.buffer),
-      ContentType: options.mimeType,
-      CacheControl: getCacheControl(options.directory, options.mimeType),
-      ContentDisposition: getContentDisposition(options.directory, options.fileName),
-    }),
-  );
+  const url = `${config.r2Endpoint}/${config.r2Bucket}/${key}`;
 
-  const url = config.r2PublicUrl
-    ? `${config.r2PublicUrl}/${key}`
-    : `${config.r2Endpoint}/${config.r2Bucket}/${key}`;
+  await aws.fetch(url, {
+    method: "PUT",
+    body: options.buffer,
+    headers: {
+      "Content-Type": options.mimeType,
+      "Cache-Control": getCacheControl(options.directory, options.mimeType),
+      "Content-Disposition": getContentDisposition(options.directory, options.fileName),
+    },
+  });
 
   return {
     id,
     name: options.fileName,
     mimeType: options.mimeType,
     size: options.buffer.byteLength,
-    url,
+    url: `${config.localBaseUrl}/${key}`,
     key,
   };
 }
 
 async function deleteR2(key: string): Promise<void> {
+  const aws = getAwsClient();
   const config = getConfig();
-  const { DeleteObjectCommand } = await import("@aws-sdk/client-s3");
-  const client = await getS3Client();
+  const url = `${config.r2Endpoint}/${config.r2Bucket}/${key}`;
 
-  await client.send(
-    new DeleteObjectCommand({
-      Bucket: config.r2Bucket,
-      Key: key,
-    }),
-  );
+  await aws.fetch(url, {
+    method: "DELETE",
+  });
 }
 
-// ─── Presigned URLs ───────────────────────────────────────────────────────────
+// ─── Download URLs ───────────────────────────────────────────────────────────
 
 /**
  * Generate a presigned download URL that expires after the given time.
@@ -235,22 +225,21 @@ export async function getDownloadUrl(
   const config = getConfig();
 
   if (config.mode !== "r2") {
-    // Local mode: return direct URL (validated by session in download route)
     return `${config.localBaseUrl}/${key}`;
   }
 
-  const { GetObjectCommand } = await import("@aws-sdk/client-s3");
-  const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
-  const client = await getS3Client();
+  const aws = getAwsClient();
+  const objectUrl = new URL(`${config.r2Endpoint}/${config.r2Bucket}/${key}`);
+  objectUrl.searchParams.set("X-Amz-Expires", String(expiresInSeconds));
+  objectUrl.searchParams.set("response-content-disposition", getContentDisposition(directory, fileName));
+  objectUrl.searchParams.set("response-content-type", mimeType);
 
-  const command = new GetObjectCommand({
-    Bucket: config.r2Bucket,
-    Key: key,
-    ResponseContentDisposition: getContentDisposition(directory, fileName),
-    ResponseContentType: mimeType,
+  const signed = await aws.sign(objectUrl.toString(), {
+    method: "GET",
+    signQuery: true,
   });
 
-  return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+  return signed.url;
 }
 
 /**

@@ -1,12 +1,26 @@
-import { auth } from "./lib/auth";
+import { getAuth } from "./lib/auth";
+import { setEnv } from "./lib/env";
 import { defineMiddleware } from "astro:middleware";
 
 export const onRequest = defineMiddleware(async (context, next) => {
-  // Skip middleware for BetterAuth API routes to avoid interfering with OAuth flow
+  // 1. Populate env from Cloudflare Workers runtime BEFORE any lazy init.
+  //    In Astro v6+ the `cloudflare:workers` virtual module provides access
+  //    to the Worker env bindings. Do a dynamic import for cross-platform compat.
+  try {
+    // @ts-expect-error - cloudflare:workers is a virtual module from the adapter
+    const { env } = await import("cloudflare:workers");
+    if (env) setEnv(env as Record<string, string | undefined>);
+  } catch {
+    // Not running on Cloudflare Workers — getEnv() will fall back to
+    // import.meta.env which is correctly populated by Vite in local dev.
+  }
+
+  // 2. Skip middleware for BetterAuth API routes to avoid interfering with OAuth flow
   if (context.url.pathname.startsWith("/api/auth/")) {
     return next();
   }
 
+  const auth = getAuth();
   const isAuthed = await auth.api.getSession({
     headers: context.request.headers,
   });

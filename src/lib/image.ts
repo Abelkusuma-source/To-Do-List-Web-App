@@ -27,7 +27,7 @@ async function getSharp(): Promise<any> {
     return _sharp;
   } catch (err) {
     _sharpError = err instanceof Error ? err : new Error(String(err));
-    if (import.meta.env.DEV) {
+    if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
       console.warn("[image] sharp not available, image processing disabled:", _sharpError.message);
     }
     return null;

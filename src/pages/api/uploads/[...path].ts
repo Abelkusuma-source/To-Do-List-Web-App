@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { storage, getDownloadUrl, getFileStream, getContentDisposition } from "../../../lib/storage";
-import { auth } from "../../../lib/auth";
-import { db } from "../../../db";
+import { getAuth } from "../../../lib/auth";
+import { getDb } from "../../../db";
 import { taskAttachmentsTable, todosTable } from "../../../db/schema";
 import { eq, and } from "drizzle-orm";
 
@@ -45,19 +45,20 @@ export const GET: APIRoute = async ({ params, request }) => {
 
   // ── Check if this is an attachment (needs auth) ─────────────────────────
   if (directory === "attachments") {
+    const auth = getAuth();
     const session = await auth.api.getSession({ headers: request.headers });
     if (!session?.user?.id) {
       return new Response("Unauthorized", { status: 401 });
     }
 
     // Verify the user owns this attachment via task ownership
-    const [attachment] = await db
+    const [attachment] = await getDb()
       .select({ taskId: taskAttachmentsTable.taskId })
       .from(taskAttachmentsTable)
       .where(eq(taskAttachmentsTable.fileUrl, `/uploads/${fileKey}`));
 
     if (attachment) {
-      const [todo] = await db
+      const [todo] = await getDb()
         .select({ id: todosTable.id })
         .from(todosTable)
         .where(and(eq(todosTable.id, attachment.taskId), eq(todosTable.userId, session.user.id)));

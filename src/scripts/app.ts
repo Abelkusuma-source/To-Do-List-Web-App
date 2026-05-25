@@ -191,7 +191,7 @@ function renderList(): void {
 
       <div class="flex flex-wrap gap-1.5 mt-1.5 ml-[34px]">
         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${statusBadgeClass(todo.status)}">${STATUS_LABELS[todo.status]}</span>
-        ${todo.priority !== "medium" ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${priorityBadgeClass(todo.priority)}">${PRIORITY_LABELS[todo.priority]}</span>` : ""}
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${priorityBadgeClass(todo.priority)}">${PRIORITY_LABELS[todo.priority]}</span>
         ${todo.deadline ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${deadlineBadgeClass(todo.deadline)}">${formatDeadline(todo.deadline)}</span>` : ""}
       </div>
     </li>
