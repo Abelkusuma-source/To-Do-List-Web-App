@@ -12,11 +12,15 @@ dist
 dist-ssr
 *.local
 
+# Local storage uploads (development only)
+data/
+
 # Environment variables
 .env
 .env.production
 .env.local
 .env.*.local
+.dev.vars
 
 # Drizzle migrations
 migrations/

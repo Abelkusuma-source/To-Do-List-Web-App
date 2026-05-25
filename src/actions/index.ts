@@ -271,24 +271,40 @@ export const server = {
         }
       }
 
-      // Process image: resize + convert to WebP
+      // Process image server-side if sharp is available (Node.js)
+      // On Cloudflare Workers, sharp is unavailable; client-side Canvas
+      // compression in app.ts already optimizes images before upload.
+      let uploadBuffer = buffer;
+      let uploadFileName = input.file.name;
+      let uploadMimeType = input.file.type;
+
       const processed = await processThumbnail(buffer);
 
-      // Generate blur-up placeholder
-      const placeholder = await generateBlurPlaceholder(processed.buffer);
+      if (processed) {
+        // Server-side processing succeeded (local dev with sharp)
+        uploadBuffer = processed.buffer;
+        uploadFileName = `${input.file.name.replace(/\.[^.]+$/, "")}.${processed.extension}`;
+        uploadMimeType = processed.mimeType;
+      }
 
-      // Upload optimized thumbnail (always WebP)
+      // Upload (original or optimized depending on sharp availability)
       const uploaded = await storage.upload({
-        buffer: processed.buffer,
-        fileName: `${input.file.name.replace(/\.[^.]+$/, "")}.${processed.extension}`,
-        mimeType: processed.mimeType,
+        buffer: uploadBuffer,
+        fileName: uploadFileName,
+        mimeType: uploadMimeType,
         directory: "thumbnails",
       });
 
-      // Update quota
-      await addStorageUsage(userId, processed.size, !todo?.thumbnailUrl);
+      // Track size for quota (use processed size if available)
+      const uploadSize = processed ? processed.size : buffer.byteLength;
+      await addStorageUsage(userId, uploadSize, !todo?.thumbnailUrl);
 
-      // Store placeholder as a data attribute or compute URL for CSS
+      // Generate blur-up placeholder if sharp is available
+      let placeholder = null;
+      if (processed) {
+        placeholder = await generateBlurPlaceholder(processed.buffer);
+      }
+
       await db
         .update(todosTable)
         .set({
@@ -299,9 +315,9 @@ export const server = {
 
       return {
         url: uploaded.url,
-        placeholder: placeholder.base64,
-        width: processed.width,
-        height: processed.height,
+        placeholder: placeholder?.base64 ?? null,
+        width: processed?.width ?? null,
+        height: processed?.height ?? null,
       };
     },
   }),
@@ -371,7 +387,7 @@ export const server = {
 
       const buffer = await input.file.arrayBuffer();
 
-      // Get image dimensions if this is an image
+      // Get image dimensions if this is an image (sharp must be available)
       let imageWidth: number | null = null;
       let imageHeight: number | null = null;
       let placeholderBlur: string | null = null;
@@ -382,10 +398,12 @@ export const server = {
           // Only extract metadata for images < 10MB
           if (buffer.byteLength < 10 * 1024 * 1024) {
             const processed = await processThumbnail(buffer, { maxWidth: 300, maxHeight: 300, quality: 70 });
-            imageWidth = processed.width;
-            imageHeight = processed.height;
-            const placeholder = await generateBlurPlaceholder(buffer);
-            placeholderBlur = placeholder.base64;
+            if (processed) {
+              imageWidth = processed.width;
+              imageHeight = processed.height;
+              const placeholder = await generateBlurPlaceholder(buffer);
+              placeholderBlur = placeholder?.base64 ?? null;
+            }
           }
         } catch {
           // Non-critical — skip image metadata

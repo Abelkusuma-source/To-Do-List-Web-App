@@ -6,23 +6,30 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview",
+    "preview": "npx wrangler pages dev dist",
+    "check": "astro check",
+    "typecheck": "tsc --noEmit",
     "migrate": "drizzle-kit migrate",
     "migrate:prod": "npx dotenv -e .env.production -- drizzle-kit migrate",
     "push": "drizzle-kit push",
     "push:prod": "npx dotenv -e .env.production -- drizzle-kit push",
-    "generate": "drizzle-kit generate"
+    "generate": "drizzle-kit generate",
+    "deploy": "npx wrangler pages deploy dist --project-name todo-app",
+    "deploy:prod": "npx wrangler pages deploy dist --project-name todo-app --branch production"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.34.5"
   },
   "overrides": {
     "vite": "^7.0.0"
   },
   "devDependencies": {
-    "@astrojs/node": "^10.1.1",
     "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.10",
     "typescript": "~6.0.2"
   },
   "dependencies": {
+    "@astrojs/cloudflare": "^13.5.4",
     "@aws-sdk/client-s3": "^3.1053.0",
     "@aws-sdk/s3-request-presigner": "^3.1053.0",
     "@better-auth/drizzle-adapter": "^1.6.11",
@@ -33,7 +40,6 @@
     "astro": "^6.3.7",
     "better-auth": "^1.6.11",
     "drizzle-orm": "^0.45.2",
-    "sharp": "^0.34.5",
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.2.2",
     "tailwindcss": "^4.3.0",

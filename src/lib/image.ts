@@ -1,4 +1,44 @@
-import sharp from "sharp";
+/**
+ * Image processing module.
+ *
+ * Uses `sharp` for server-side image processing (resize, convert to WebP,
+ * generate blur placeholders). On Cloudflare Workers where native binaries
+ * are not available, we fall back gracefully — functions return null/empty
+ * results and the caller (actions) relies on client-side compression instead.
+ *
+ * Client-side image compression is handled in app.ts via Canvas API,
+ * which runs before the upload action is called.
+ */
+
+// ─── Lazy `sharp` Import ────────────────────────────────────────────────────
+// sharp is a native binary that doesn't work on Cloudflare Workers.
+// We lazily import it so this module can be loaded without crashing.
+
+let _sharp: any = null;
+let _sharpError: Error | null = null;
+
+async function getSharp(): Promise<any> {
+  if (_sharpError) return null;
+  if (_sharp) return _sharp;
+
+  try {
+    const mod = await import("sharp");
+    _sharp = mod.default || mod;
+    return _sharp;
+  } catch (err) {
+    _sharpError = err instanceof Error ? err : new Error(String(err));
+    if (import.meta.env.DEV) {
+      console.warn("[image] sharp not available, image processing disabled:", _sharpError.message);
+    }
+    return null;
+  }
+}
+
+/** Check if sharp (and thus server-side image processing) is available */
+export async function isSharpAvailable(): Promise<boolean> {
+  const s = await getSharp();
+  return s !== null;
+}
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -41,35 +81,37 @@ export interface ProcessedImage {
  * - Resize to fit within maxWidth x maxHeight (maintaining aspect ratio)
  * - Convert to WebP (or configured format)
  * - Compress with quality setting
+ *
+ * Returns null if sharp is not available (e.g., Cloudflare Workers).
+ * In that case, rely on client-side compression (Canvas API in app.ts).
  */
 export async function processThumbnail(
   input: Buffer | ArrayBuffer,
   options: Partial<ImageOptions> = {},
-): Promise<ProcessedImage> {
+): Promise<ProcessedImage | null> {
+  const sharp = await getSharp();
+  if (!sharp) return null;
+
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const buffer = input instanceof ArrayBuffer ? Buffer.from(input) : input;
 
   const metadata = await sharp(buffer).metadata();
-
-  // Determine resize dimensions maintaining aspect ratio
   const width = metadata.width ?? 0;
   const height = metadata.height ?? 0;
 
-  let resizeOpts: sharp.ResizeOptions = {
+  const resizeOpts: sharp.ResizeOptions = {
     fit: "inside",
     withoutEnlargement: true,
+    ...(width > opts.maxWidth || height > opts.maxHeight
+      ? { width: opts.maxWidth, height: opts.maxHeight }
+      : {}),
   };
 
-  // Only resize if image exceeds max dimensions
-  if (width > opts.maxWidth || height > opts.maxHeight) {
-    resizeOpts = {
-      ...resizeOpts,
-      width: opts.maxWidth,
-      height: opts.maxHeight,
-    };
-  }
-
-  const mimeType = opts.format === "webp" ? "image/webp" : opts.format === "avif" ? "image/avif" : opts.format === "jpeg" ? "image/jpeg" : "image/png";
+  const mimeType =
+    opts.format === "webp" ? "image/webp" :
+    opts.format === "avif" ? "image/avif" :
+    opts.format === "jpeg" ? "image/jpeg" :
+    "image/png";
   const extension = opts.format === "jpeg" ? "jpg" : opts.format;
 
   const processed = await sharp(buffer)
@@ -101,18 +143,22 @@ export interface BlurPlaceholder {
 /**
  * Generate a tiny blur-up placeholder from an image buffer.
  * Creates a 10px-wide image encoded as a base64 data URI for use
- * as a low-quality image placeholder (LQIP) while the full image loads.
+ * as a low-quality image placeholder (LQIP).
+ *
+ * Returns null if sharp is not available.
  */
 export async function generateBlurPlaceholder(
   input: Buffer | ArrayBuffer,
-): Promise<BlurPlaceholder> {
+): Promise<BlurPlaceholder | null> {
+  const sharp = await getSharp();
+  if (!sharp) return null;
+
   const buffer = input instanceof ArrayBuffer ? Buffer.from(input) : input;
 
   const metadata = await sharp(buffer).metadata();
   const origWidth = metadata.width ?? 1;
   const origHeight = metadata.height ?? 1;
 
-  // Create a 10px-wide blurred version
   const tinyBuffer = await sharp(buffer)
     .resize(10, null, { fit: "inside" })
     .blur(5)
@@ -132,6 +178,7 @@ export async function generateBlurPlaceholder(
 /**
  * Validate that a buffer starts with known image magic bytes.
  * More reliable than trusting the Content-Type header alone.
+ * This function has no sharp dependency, so it works everywhere.
  */
 export function isValidImageBuffer(buffer: ArrayBuffer | Uint8Array): boolean {
   const bytes = new Uint8Array(buffer.slice(0, 12));

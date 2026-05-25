@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -71,10 +70,25 @@ function getConfig(): StorageConfig {
   };
 }
 
+// ─── Lazy `fs` Import ────────────────────────────────────────────────────────
+// Cloudflare Workers do not support node:fs. We dynamically import it so that
+// the module can be loaded on edge runtimes without crashing. The fs module is
+// only needed when running in "local" storage mode (development only).
+
+let _fs: typeof import("node:fs") | null = null;
+
+async function getFs(): Promise<typeof import("node:fs")> {
+  if (!_fs) {
+    _fs = await import("node:fs");
+  }
+  return _fs;
+}
+
 // ─── Local Filesystem Storage ────────────────────────────────────────────────
 
 async function uploadLocal(options: UploadOptions): Promise<StorageFile> {
   const config = getConfig();
+  const fs = await getFs();
   const id = crypto.randomUUID();
   const ext = path.extname(options.fileName);
   const safeName = `${id}${ext}`;
@@ -98,6 +112,7 @@ async function uploadLocal(options: UploadOptions): Promise<StorageFile> {
 }
 
 async function deleteLocal(key: string): Promise<void> {
+  const fs = await getFs();
   const config = getConfig();
   const fullPath = path.join(config.localPath, key);
   try {
@@ -242,9 +257,12 @@ export async function getDownloadUrl(
  * Stream a file from storage to the response.
  * Used for local mode downloads with proper headers and Range support.
  * For R2 mode, prefer using presigned URLs instead.
+ *
+ * NOTE: This function uses node:fs and is only available in "local" mode.
+ * In Cloudflare Workers (R2 mode), returns null.
  */
 export async function getFileStream(key: string): Promise<{
-  stream: fs.ReadStream;
+  stream: import("stream").Readable;
   size: number;
 } | null> {
   const config = getConfig();
@@ -253,6 +271,7 @@ export async function getFileStream(key: string): Promise<{
     return null; // R2 mode uses presigned URLs
   }
 
+  const fs = await getFs();
   const fullPath = path.join(config.localPath, key);
   try {
     await fs.promises.access(fullPath, fs.constants.R_OK);

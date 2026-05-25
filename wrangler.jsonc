@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "todo-app",
+  "compatibility_date": "2026-05-21",
+  "compatibility_flags": ["nodejs_compat"],
+  "kv_namespaces": [
+    { "binding": "SESSION" }
+  ],
+  "images": {
+    "binding": "IMAGES"
+  },
+  "workers_dev": true
+}

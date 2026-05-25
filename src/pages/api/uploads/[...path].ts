@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import type { APIRoute } from "astro";
 import { storage, getDownloadUrl, getFileStream, getContentDisposition } from "../../../lib/storage";
 import { auth } from "../../../lib/auth";
@@ -49,22 +48,24 @@ export const GET: APIRoute = async ({ params, request }) => {
     const session = await auth.api.getSession({ headers: request.headers });
     if (!session?.user?.id) {
       return new Response("Unauthorized", { status: 401 });
-    }    // Verify the user owns this attachment via task ownership
-      const [attachment] = await db
-        .select({ taskId: taskAttachmentsTable.taskId })
-        .from(taskAttachmentsTable)
-        .where(eq(taskAttachmentsTable.fileUrl, `/uploads/${fileKey}`));
+    }
 
-      if (attachment) {
-        const [todo] = await db
-          .select({ id: todosTable.id })
-          .from(todosTable)
-          .where(and(eq(todosTable.id, attachment.taskId), eq(todosTable.userId, session.user.id)));
+    // Verify the user owns this attachment via task ownership
+    const [attachment] = await db
+      .select({ taskId: taskAttachmentsTable.taskId })
+      .from(taskAttachmentsTable)
+      .where(eq(taskAttachmentsTable.fileUrl, `/uploads/${fileKey}`));
 
-        if (!todo) {
-          return new Response("Forbidden", { status: 403 });
-        }
+    if (attachment) {
+      const [todo] = await db
+        .select({ id: todosTable.id })
+        .from(todosTable)
+        .where(and(eq(todosTable.id, attachment.taskId), eq(todosTable.userId, session.user.id)));
+
+      if (!todo) {
+        return new Response("Forbidden", { status: 403 });
       }
+    }
   }
 
   // ── Get storage config for serving ──────────────────────────────────────
@@ -72,7 +73,6 @@ export const GET: APIRoute = async ({ params, request }) => {
 
   if (config.mode === "r2") {
     // R2 mode: Redirect to presigned URL for direct download
-    // Extract original filename from the fileKey if possible, or use a default
     const fileName = fileKey.split("/").pop() ?? "file";
     const mimeType = getMimeTypeFromExt(fileKey);
 
@@ -102,8 +102,12 @@ export const GET: APIRoute = async ({ params, request }) => {
     if (range) {
       const { start, end } = range;
       const chunkSize = end - start + 1;
+      const path = await import("node:path");
+      const fullPath = path.default.join(config.localPath, fileKey);
 
-      const partialStream = fs.createReadStream(fileKey, { start, end });
+      // Dynamic fs import for range responses (local mode only)
+      const fsModule = await import("node:fs");
+      const partialStream = fsModule.createReadStream(fullPath, { start, end });
 
       return new Response(partialStream as any, {
         status: 206,

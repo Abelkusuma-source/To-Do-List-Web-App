@@ -1,13 +1,17 @@
 import { defineConfig } from "astro/config";
 import tailwindcss from "@tailwindcss/vite";
-import node from "@astrojs/node";
+import cloudflare from "@astrojs/cloudflare";
 
 export default defineConfig({
-  site: "https://example.com",
+  site: "https://todo-app.kusumaabel07.workers.dev",
   srcDir: "./src",
   outDir: "./dist",
   output: "server",
-  adapter: node({ mode: "standalone" }),
+  adapter: cloudflare({
+    platformProxy: {
+      enabled: true,
+    },
+  }),
   vite: {
     plugins: [tailwindcss()],
   },
